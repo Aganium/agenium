@@ -14,8 +14,8 @@
 | 6 | ✅ COMPLETE | Message passing (REQUEST/RESPONSE/EVENT/ERROR) |
 | 7 | ✅ COMPLETE | DNS integration (agent:// resolution) |
 | 8 | ✅ COMPLETE | Session persistence + reliable messaging |
-| 9 | ✅ COMPLETE | **Bug report server + integration** |
-| 10 | ⏳ PENDING | Production hardening |
+| 9 | ✅ COMPLETE | Bug report server + integration |
+| 10 | ✅ COMPLETE | **Production hardening** |
 
 ## Key Requirements
 
