@@ -7,7 +7,7 @@
 | Phase | Status | Description |
 |-------|--------|-------------|
 | 1 | ✅ COMPLETE | Architecture & Design |
-| 2 | ⏳ PENDING | Project skeleton & core types |
+| 2 | ✅ COMPLETE | Project skeleton & core types |
 | 3 | ⏳ PENDING | Protocol resolver (agent://) |
 | 4 | ⏳ PENDING | Session manager (stateful) |
 | 5 | ⏳ PENDING | Bug reporter subsystem |
