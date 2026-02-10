@@ -11,8 +11,8 @@
 | 3 | ✅ COMPLETE | Transport layer (mTLS + HTTP/2) |
 | 4 | ✅ COMPLETE | Handshake protocol |
 | 5 | ✅ COMPLETE | FSM integration |
-| 6 | ⏳ PENDING | Message passing |
-| 7 | ⏳ PENDING | Integration & testing |
+| 6 | ✅ COMPLETE | Message passing (REQUEST/RESPONSE/EVENT/ERROR) |
+| 7 | ⏳ PENDING | DNS integration & persistence |
 
 ## Key Requirements
 

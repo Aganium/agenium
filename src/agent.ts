@@ -1,6 +1,6 @@
 /**
  * AGENIUM Agent
- * Integrated agent with transport, handshake, and session management
+ * Integrated agent with transport, handshake, session management, and messaging
  */
 
 import { EventEmitter } from 'node:events';
@@ -41,6 +41,18 @@ import {
 import { initializeKeys, KeyStore } from './crypto/keys.js';
 import { initializeCA, createAgentCert, CAInfo, CertificateInfo } from './crypto/certs.js';
 
+import {
+  MessageDispatcher,
+  createDispatcher,
+  RequestHandler,
+  EventHandler,
+} from './protocol/dispatcher.js';
+import {
+  AnyFrame,
+  MessageType,
+  validateFrame,
+} from './protocol/types.js';
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -53,6 +65,12 @@ export interface ConnectResult {
   success: boolean;
   session?: Session;
   error?: string;
+}
+
+/** Session connection info for messaging */
+interface SessionConnection {
+  host: string;
+  port: number;
 }
 
 // ============================================================================
@@ -75,6 +93,9 @@ export class Agent extends EventEmitter {
   
   private handshakeInitiator: HandshakeInitiator;
   private handshakeResponder: HandshakeResponder;
+  
+  private dispatcher: MessageDispatcher;
+  private sessionConnections: Map<string, SessionConnection> = new Map();
   
   private isRunning: boolean = false;
 
@@ -128,14 +149,29 @@ export class Agent extends EventEmitter {
     this.handshakeInitiator = handlers.initiator;
     this.handshakeResponder = handlers.responder;
     
+    // Initialize message dispatcher
+    this.dispatcher = createDispatcher({
+      maxPendingPerSession: 10,
+      maxPendingTotal: 100,
+      maxQueuePerSession: 50,
+      defaultTimeoutMs: this.config.requestTimeoutMs,
+    });
+    
+    // Wire up dispatcher send function
+    this.dispatcher.setSendFunction((sessionId, frame) => this.sendFrame(sessionId, frame));
+    
     // Wire up bug reporter state provider
     this.bugReporter.setStateProvider(() => ({
       sessionCount: this.sessions.getStats().total,
-      queueDepth: 0,
+      queueDepth: this.dispatcher.getStats().queuedMessages,
       memoryUsageMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
       activeConnections: this.sessions.getActiveCount(),
     }));
   }
+
+  // ============================================================================
+  // Identity
+  // ============================================================================
 
   /**
    * Get agent identity
@@ -150,6 +186,10 @@ export class Agent extends EventEmitter {
   getURI(): string {
     return `agent://${this.identity.name}`;
   }
+
+  // ============================================================================
+  // Lifecycle
+  // ============================================================================
 
   /**
    * Start the agent (server + background tasks)
@@ -196,6 +236,7 @@ export class Agent extends EventEmitter {
     if (!this.isRunning) return;
     
     this.isRunning = false;
+    this.dispatcher.shutdown();
     
     if (this.server) {
       await this.server.stop();
@@ -207,6 +248,10 @@ export class Agent extends EventEmitter {
     
     this.emit('stopped');
   }
+
+  // ============================================================================
+  // Connection
+  // ============================================================================
 
   /**
    * Connect to a remote agent by URI or direct address
@@ -299,6 +344,9 @@ export class Agent extends EventEmitter {
       const updatedSession = this.sessions.get(session.id)!;
       updatedSession.remoteAgent = responseData.agentId;
       
+      // Store connection info for messaging
+      this.sessionConnections.set(session.id, { host, port });
+      
       // Transition to ACTIVE
       this.sessions.transition(session.id, SessionEvent.HANDSHAKE_OK);
       this.sessions.setCapabilities(session.id, result.negotiatedCapabilities);
@@ -324,23 +372,101 @@ export class Agent extends EventEmitter {
     }
   }
 
+  // ============================================================================
+  // Messaging
+  // ============================================================================
+
   /**
-   * Send a message to a connected session
+   * Register a request handler
    */
-  async send(sessionId: string, message: unknown): Promise<boolean> {
+  onRequest(method: string, handler: RequestHandler): void {
+    this.dispatcher.onRequest(method, handler);
+  }
+
+  /**
+   * Register an event handler
+   */
+  onEvent(event: string, handler: EventHandler): void {
+    this.dispatcher.onEvent(event, handler);
+  }
+
+  /**
+   * Send a request to a remote agent
+   */
+  async request(
+    sessionId: string,
+    method: string,
+    params?: Record<string, unknown>,
+    timeoutMs?: number
+  ): Promise<unknown> {
     const session = this.sessions.get(sessionId);
-    if (!session || session.state !== SessionState.ACTIVE) {
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    if (session.state !== SessionState.ACTIVE) {
+      throw new Error(`Session not active: ${session.state}`);
+    }
+
+    return this.dispatcher.request(sessionId, method, params, timeoutMs);
+  }
+
+  /**
+   * Send an event to a remote agent (fire-and-forget)
+   */
+  async event(sessionId: string, event: string, data?: unknown): Promise<boolean> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    if (session.state !== SessionState.ACTIVE) {
+      throw new Error(`Session not active: ${session.state}`);
+    }
+
+    return this.dispatcher.event(sessionId, event, data);
+  }
+
+  /**
+   * Send a frame over the network
+   */
+  private async sendFrame(sessionId: string, frame: AnyFrame): Promise<boolean> {
+    const conn = this.sessionConnections.get(sessionId);
+    if (!conn) {
+      // This might be an inbound session - we need to respond differently
+      // For now, emit an event that the response handler will catch
+      this.emit('outbound_frame', { sessionId, frame });
+      return true;
+    }
+
+    try {
+      const response = await this.client.request(conn.host, conn.port, {
+        method: 'POST',
+        path: '/message',
+        body: JSON.stringify(frame),
+      });
+
+      if (response.status === 200 && response.body.length > 0) {
+        // If we got a response body, it might be a RESPONSE frame
+        try {
+          const responseFrame = JSON.parse(response.body.toString());
+          if (responseFrame && responseFrame.type) {
+            // Process the response through the dispatcher
+            await this.dispatcher.handleIncoming(responseFrame);
+          }
+        } catch {
+          // Not JSON or not a frame - that's OK
+        }
+      }
+
+      return response.status === 200;
+    } catch (err) {
+      this.bugReporter.reportError(err as Error, 'connection');
       return false;
     }
-    
-    // TODO: Implement message sending
-    this.bugReporter.recordAction('send_message', {
-      sessionId,
-      messageType: typeof message,
-    });
-    
-    return true;
   }
+
+  // ============================================================================
+  // Session Management
+  // ============================================================================
 
   /**
    * Get session by ID
@@ -365,6 +491,7 @@ export class Agent extends EventEmitter {
       isRunning: this.isRunning,
       sessions: this.sessions.getStats(),
       connections: this.client.getStats(),
+      dispatcher: this.dispatcher.getStats(),
       bugReporter: this.bugReporter.getStats(),
     };
   }
@@ -422,6 +549,26 @@ export class Agent extends EventEmitter {
         });
         
         return { status: 200, body: JSON.stringify({ sessionId: session.id }) };
+      }
+      
+      // Message endpoint
+      if (req.path === '/message' && req.method === 'POST') {
+        const frame = JSON.parse(req.body.toString());
+        const validation = validateFrame(frame);
+        
+        if (!validation.valid) {
+          return { status: 400, body: JSON.stringify({ error: validation.error }) };
+        }
+        
+        // Process the message
+        const responseFrame = await this.dispatcher.handleIncoming(frame);
+        
+        if (responseFrame) {
+          // Send the response back directly
+          return { status: 200, body: JSON.stringify(responseFrame) };
+        }
+        
+        return { status: 200, body: JSON.stringify({ ok: true }) };
       }
       
       // Health check
