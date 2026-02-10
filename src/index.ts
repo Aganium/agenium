@@ -70,5 +70,15 @@ export {
   DEFAULT_CAPABILITIES,
 } from './transport/index.js';
 
+// Persistence
+export {
+  DatabaseManager,
+  createDatabase,
+  ResumeManager,
+  createResumeManager,
+  OutboxManager,
+  createOutboxManager,
+} from './persistence/index.js';
+
 // High-level Agent API
 export { Agent, createAgent, type AgentConfig, type ConnectResult } from './agent.js';

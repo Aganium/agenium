@@ -1,6 +1,7 @@
 /**
  * AGENIUM Agent
- * Integrated agent with transport, handshake, session management, and messaging
+ * Integrated agent with transport, handshake, session management, messaging,
+ * persistent sessions, and reliable delivery
  */
 
 import { EventEmitter } from 'node:events';
@@ -51,7 +52,16 @@ import {
   AnyFrame,
   MessageType,
   validateFrame,
+  createEventFrame,
 } from './protocol/types.js';
+
+import {
+  DatabaseManager,
+  createDatabase,
+  PersistedSession,
+} from './persistence/database.js';
+import { ResumeManager, createResumeManager } from './persistence/resume.js';
+import { OutboxManager, createOutboxManager } from './persistence/outbox.js';
 
 // ============================================================================
 // Types
@@ -59,6 +69,8 @@ import {
 
 export interface AgentConfig extends Partial<AgeniumConfig> {
   capabilities?: Capability[];
+  /** Enable persistence (default: true) */
+  persistence?: boolean;
 }
 
 export interface ConnectResult {
@@ -71,6 +83,8 @@ export interface ConnectResult {
 interface SessionConnection {
   host: string;
   port: number;
+  endpoint: string;
+  remotePublicKey: string;
 }
 
 // ============================================================================
@@ -78,7 +92,7 @@ interface SessionConnection {
 // ============================================================================
 
 export class Agent extends EventEmitter {
-  private config: AgeniumConfig;
+  private config: AgeniumConfig & { persistence: boolean };
   private identity: AgentID;
   private keys: KeyStore;
   private ca: CAInfo;
@@ -97,13 +111,26 @@ export class Agent extends EventEmitter {
   private dispatcher: MessageDispatcher;
   private sessionConnections: Map<string, SessionConnection> = new Map();
   
+  // Persistence
+  private db: DatabaseManager | null = null;
+  private resumeManager: ResumeManager | null = null;
+  private outboxManager: OutboxManager | null = null;
+  
+  // Deduplication cache (in-memory for fast lookup)
+  private dedupeCache: Map<string, number> = new Map();
+  
   private isRunning: boolean = false;
 
   constructor(name: string, config: AgentConfig = {}) {
     super();
     
     // Merge config
-    this.config = { ...DEFAULT_CONFIG, ...config, agentName: name };
+    this.config = { 
+      ...DEFAULT_CONFIG, 
+      ...config, 
+      agentName: name,
+      persistence: config.persistence ?? true,
+    };
     
     // Expand data dir
     this.config.dataDir = this.config.dataDir.replace('~', os.homedir());
@@ -157,46 +184,63 @@ export class Agent extends EventEmitter {
       defaultTimeoutMs: this.config.requestTimeoutMs,
     });
     
-    // Wire up dispatcher send function
+    // Wire up dispatcher send function (with persistence if enabled)
     this.dispatcher.setSendFunction((sessionId, frame) => this.sendFrame(sessionId, frame));
+    
+    // Initialize persistence if enabled
+    if (this.config.persistence) {
+      this.db = createDatabase(name, this.config.dataDir);
+      this.db.open();
+      
+      this.resumeManager = createResumeManager(this.db);
+      this.resumeManager.setResumeFunction((session) => this.resumeSession(session));
+      
+      this.outboxManager = createOutboxManager(this.db);
+      this.outboxManager.setSendFunction((sessionId, frame) => this.sendFrameDirect(sessionId, frame));
+      
+      // Forward outbox events
+      this.outboxManager.on('sent', (info) => this.emit('message_sent', info));
+      this.outboxManager.on('failed', (info) => this.emit('message_failed', info));
+      this.outboxManager.on('acked', (info) => this.emit('message_acked', info));
+      
+      // Forward resume events
+      this.resumeManager.on('resumed', (info) => this.emit('session_resumed', info));
+      this.resumeManager.on('resume_failed', (info) => this.emit('session_resume_failed', info));
+    }
     
     // Wire up bug reporter state provider
     this.bugReporter.setStateProvider(() => ({
       sessionCount: this.sessions.getStats().total,
-      queueDepth: this.dispatcher.getStats().queuedMessages,
+      queueDepth: this.outboxManager?.getStats().pending ?? 0,
       memoryUsageMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
       activeConnections: this.sessions.getActiveCount(),
     }));
+    
+    // Register built-in ACK handler
+    this.dispatcher.onEvent('ACK', (event, data, sessionId) => {
+      const msgId = (data as any)?.msgId;
+      if (msgId && this.outboxManager) {
+        this.outboxManager.ack(msgId);
+      }
+    });
   }
 
   // ============================================================================
   // Identity
   // ============================================================================
 
-  /**
-   * Get agent identity
-   */
   getIdentity(): AgentID {
     return this.identity;
   }
 
-  /**
-   * Get agent URI
-   */
   getURI(): string {
     return `agent://${this.identity.name}`;
   }
 
-  /**
-   * Get endpoint URL for DNS registration
-   */
   getEndpoint(host: string = 'localhost'): string {
     return `https://${host}:${this.config.listenPort}`;
   }
 
-  /**
-   * Get DNS registration info
-   */
   getDNSRegistration(host: string = 'localhost') {
     return {
       name: this.identity.name,
@@ -208,29 +252,27 @@ export class Agent extends EventEmitter {
     };
   }
 
-  /**
-   * Configure DNS resolver
-   */
   setDNSServer(server: string, port: number = 443, useHttps: boolean = true): void {
-    this.resolver = new DNSResolver({
-      server,
-      port,
-      useHttps,
-    });
+    this.resolver = new DNSResolver({ server, port, useHttps });
   }
 
   // ============================================================================
   // Lifecycle
   // ============================================================================
 
-  /**
-   * Start the agent (server + background tasks)
-   */
   async start(): Promise<void> {
     if (this.isRunning) return;
     
     this.bugReporter.start();
     this.client.start();
+    
+    // Start persistence managers
+    if (this.resumeManager) {
+      this.resumeManager.start();
+    }
+    if (this.outboxManager) {
+      this.outboxManager.start();
+    }
     
     // Create and start server
     this.server = createServer({
@@ -261,13 +303,19 @@ export class Agent extends EventEmitter {
     });
   }
 
-  /**
-   * Stop the agent
-   */
   async stop(): Promise<void> {
     if (!this.isRunning) return;
     
     this.isRunning = false;
+    
+    // Stop persistence managers
+    if (this.resumeManager) {
+      this.resumeManager.stop();
+    }
+    if (this.outboxManager) {
+      this.outboxManager.stop();
+    }
+    
     this.dispatcher.shutdown();
     
     if (this.server) {
@@ -278,6 +326,11 @@ export class Agent extends EventEmitter {
     this.client.stop();
     this.bugReporter.stop();
     
+    // Close database
+    if (this.db) {
+      this.db.close();
+    }
+    
     this.emit('stopped');
   }
 
@@ -285,9 +338,6 @@ export class Agent extends EventEmitter {
   // Connection
   // ============================================================================
 
-  /**
-   * Connect to a remote agent by URI or direct address
-   */
   async connect(target: string | { host: string; port: number }): Promise<ConnectResult> {
     this.bugReporter.recordAction('connect', { target });
     
@@ -295,9 +345,9 @@ export class Agent extends EventEmitter {
     let port: number;
     let remoteAgentName: string;
     let resolvedAgent: ResolvedAgent | null = null;
+    let endpoint: string;
     
     if (typeof target === 'string') {
-      // agent:// URI - resolve via DNS
       const result = await this.resolver.resolve(target);
       if (!result.ok) {
         this.bugReporter.report('connection', `DNS_${result.error.code}`, result.error.message);
@@ -308,19 +358,15 @@ export class Agent extends EventEmitter {
       host = resolvedAgent.host;
       port = resolvedAgent.port;
       remoteAgentName = resolvedAgent.name;
-      
-      this.bugReporter.recordAction('dns_resolved', {
-        name: resolvedAgent.name,
-        endpoint: resolvedAgent.endpoint,
-      });
+      endpoint = resolvedAgent.endpoint;
     } else {
-      // Direct connection
       host = target.host;
       port = target.port;
       remoteAgentName = `${host}:${port}`;
+      endpoint = `https://${host}:${port}`;
     }
     
-    // Check for existing session
+    // Check for existing active session
     let session = this.sessions.findByRemote(remoteAgentName);
     if (session && session.state === SessionState.ACTIVE) {
       return { success: true, session };
@@ -330,18 +376,15 @@ export class Agent extends EventEmitter {
     if (!session) {
       session = this.sessions.create({
         name: remoteAgentName,
-        publicKey: '', // Will be filled during handshake
+        publicKey: '',
       });
     }
     
-    // Transition to CONNECTING
     this.sessions.transition(session.id, SessionEvent.CONNECT);
     
     try {
-      // Create handshake init
       const init = this.handshakeInitiator.createInit();
       
-      // Send handshake init
       const response = await this.client.request(host, port, {
         method: 'POST',
         path: '/handshake/init',
@@ -358,17 +401,14 @@ export class Agent extends EventEmitter {
         throw new Error(`Handshake error: ${responseData.message}`);
       }
       
-      // Transition to HANDSHAKING
       this.sessions.transition(session.id, SessionEvent.CONNECTED);
       
-      // Process response
       const result = this.handshakeInitiator.processResponse(responseData);
       
       if (!this.handshakeInitiator.isComplete(result)) {
         throw new Error(`Handshake failed: ${(result as HandshakeResult).error?.message}`);
       }
       
-      // Send completion
       const completeResponse = await this.client.request(host, port, {
         method: 'POST',
         path: '/handshake/complete',
@@ -379,26 +419,44 @@ export class Agent extends EventEmitter {
         throw new Error(`Handshake complete failed with status ${completeResponse.status}`);
       }
       
-      // Update session with remote identity
       const updatedSession = this.sessions.get(session.id)!;
       updatedSession.remoteAgent = responseData.agentId;
       
-      // Verify public key if we resolved via DNS
-      if (resolvedAgent) {
-        if (responseData.agentId.publicKey !== resolvedAgent.publicKey) {
-          this.bugReporter.report('protocol', 'KEY_MISMATCH', 
-            `Public key mismatch for ${remoteAgentName}. DNS: ${resolvedAgent.publicKey.slice(0, 20)}..., handshake: ${responseData.agentId.publicKey.slice(0, 20)}...`);
-          throw new Error(`Security error: Public key mismatch for ${remoteAgentName}. Connection rejected.`);
-        }
-        this.bugReporter.recordAction('key_verified', { agent: remoteAgentName });
+      // Verify public key if DNS resolved
+      if (resolvedAgent && responseData.agentId.publicKey !== resolvedAgent.publicKey) {
+        this.bugReporter.report('protocol', 'KEY_MISMATCH', 
+          `Public key mismatch for ${remoteAgentName}`);
+        throw new Error(`Security error: Public key mismatch for ${remoteAgentName}`);
       }
       
-      // Store connection info for messaging
-      this.sessionConnections.set(session.id, { host, port });
+      // Store connection info
+      this.sessionConnections.set(session.id, { 
+        host, 
+        port, 
+        endpoint,
+        remotePublicKey: responseData.agentId.publicKey,
+      });
       
-      // Transition to ACTIVE
       this.sessions.transition(session.id, SessionEvent.HANDSHAKE_OK);
       this.sessions.setCapabilities(session.id, result.negotiatedCapabilities);
+      
+      // Persist session
+      if (this.db) {
+        this.db.saveSession({
+          sessionId: session.id,
+          remoteAgentName,
+          remotePublicKey: responseData.agentId.publicKey,
+          endpoint,
+          host,
+          port,
+          state: 'ACTIVE',
+          capabilities: JSON.stringify(result.negotiatedCapabilities),
+          createdAt: session.createdAt,
+          lastSeenAt: now(),
+          lastErrorCode: null,
+          protocolVersion: '1.0',
+        });
+      }
       
       this.emit('connected', {
         sessionId: session.id,
@@ -410,14 +468,108 @@ export class Agent extends EventEmitter {
       
     } catch (err) {
       this.sessions.transition(session.id, SessionEvent.ERROR);
-      const session_updated = this.sessions.get(session.id)!;
-      session_updated.errorMessage = (err as Error).message;
+      const errorMsg = (err as Error).message;
       
-      this.bugReporter.report('connection', 'CONNECT_FAILED', (err as Error).message, {
+      this.bugReporter.report('connection', 'CONNECT_FAILED', errorMsg, {
         sessionId: session.id,
       });
       
-      return { success: false, error: (err as Error).message };
+      return { success: false, error: errorMsg };
+    }
+  }
+
+  /**
+   * Resume a persisted session
+   */
+  private async resumeSession(persisted: PersistedSession): Promise<boolean> {
+    this.bugReporter.recordAction('resume_session', {
+      sessionId: persisted.sessionId,
+      remoteAgent: persisted.remoteAgentName,
+    });
+    
+    try {
+      // DNS resolve to get current endpoint
+      const dnsResult = await this.resolver.resolve(`agent://${persisted.remoteAgentName}`);
+      
+      if (dnsResult.ok) {
+        // Verify key hasn't changed
+        if (dnsResult.agent.publicKey !== persisted.remotePublicKey) {
+          this.bugReporter.report('protocol', 'KEY_MISMATCH', 
+            `Resumed session key mismatch for ${persisted.remoteAgentName}`);
+          throw new Error('Public key mismatch during resume');
+        }
+      }
+      
+      // Use persisted endpoint if DNS fails
+      const host = dnsResult.ok ? dnsResult.agent.host : persisted.host;
+      const port = dnsResult.ok ? dnsResult.agent.port : persisted.port;
+      
+      // Attempt handshake
+      const init = this.handshakeInitiator.createInit();
+      
+      const response = await this.client.request(host, port, {
+        method: 'POST',
+        path: '/handshake/init',
+        body: JSON.stringify(init),
+      });
+      
+      if (response.status !== 200) {
+        throw new Error(`Resume handshake failed: ${response.status}`);
+      }
+      
+      const responseData = JSON.parse(response.body.toString()) as HandshakeResponse | HandshakeError;
+      
+      if (responseData.type === 'handshake_error') {
+        throw new Error(`Resume error: ${responseData.message}`);
+      }
+      
+      // Verify key matches persisted
+      if (responseData.agentId.publicKey !== persisted.remotePublicKey) {
+        this.bugReporter.report('protocol', 'KEY_MISMATCH', 
+          `Handshake key mismatch during resume for ${persisted.remoteAgentName}`);
+        throw new Error('Key mismatch during resume handshake');
+      }
+      
+      const result = this.handshakeInitiator.processResponse(responseData);
+      
+      if (!this.handshakeInitiator.isComplete(result)) {
+        throw new Error(`Resume handshake failed: ${(result as HandshakeResult).error?.message}`);
+      }
+      
+      await this.client.request(host, port, {
+        method: 'POST',
+        path: '/handshake/complete',
+        body: JSON.stringify(result),
+      });
+      
+      // Recreate in-memory session
+      const session = this.sessions.create({
+        name: persisted.remoteAgentName,
+        publicKey: persisted.remotePublicKey,
+      });
+      
+      // Override with persisted ID
+      (session as any).id = persisted.sessionId;
+      
+      this.sessions.transition(session.id, SessionEvent.CONNECT);
+      this.sessions.transition(session.id, SessionEvent.CONNECTED);
+      this.sessions.transition(session.id, SessionEvent.HANDSHAKE_OK);
+      this.sessions.setCapabilities(session.id, JSON.parse(persisted.capabilities));
+      
+      this.sessionConnections.set(session.id, {
+        host,
+        port,
+        endpoint: persisted.endpoint,
+        remotePublicKey: persisted.remotePublicKey,
+      });
+      
+      return true;
+      
+    } catch (err) {
+      this.bugReporter.report('connection', 'RESUME_FAILED', (err as Error).message, {
+        sessionId: persisted.sessionId,
+      });
+      return false;
     }
   }
 
@@ -425,23 +577,14 @@ export class Agent extends EventEmitter {
   // Messaging
   // ============================================================================
 
-  /**
-   * Register a request handler
-   */
   onRequest(method: string, handler: RequestHandler): void {
     this.dispatcher.onRequest(method, handler);
   }
 
-  /**
-   * Register an event handler
-   */
   onEvent(event: string, handler: EventHandler): void {
     this.dispatcher.onEvent(event, handler);
   }
 
-  /**
-   * Send a request to a remote agent
-   */
   async request(
     sessionId: string,
     method: string,
@@ -459,9 +602,6 @@ export class Agent extends EventEmitter {
     return this.dispatcher.request(sessionId, method, params, timeoutMs);
   }
 
-  /**
-   * Send an event to a remote agent (fire-and-forget)
-   */
   async event(sessionId: string, event: string, data?: unknown): Promise<boolean> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -475,15 +615,31 @@ export class Agent extends EventEmitter {
   }
 
   /**
-   * Send a frame over the network
+   * Send frame with persistence (reliable delivery)
    */
   private async sendFrame(sessionId: string, frame: AnyFrame): Promise<boolean> {
+    // Use outbox for reliable delivery
+    if (this.outboxManager && (frame.type === MessageType.REQUEST || frame.type === MessageType.EVENT)) {
+      const result = this.outboxManager.enqueue(sessionId, frame);
+      return result.success;
+    }
+    
+    // Direct send for RESPONSE/ERROR
+    const result = await this.sendFrameDirect(sessionId, frame);
+    return result.success;
+  }
+
+  /**
+   * Direct send without persistence
+   */
+  private async sendFrameDirect(sessionId: string, frame: AnyFrame): Promise<{
+    success: boolean;
+    error?: string;
+    isRetryable?: boolean;
+  }> {
     const conn = this.sessionConnections.get(sessionId);
     if (!conn) {
-      // This might be an inbound session - we need to respond differently
-      // For now, emit an event that the response handler will catch
-      this.emit('outbound_frame', { sessionId, frame });
-      return true;
+      return { success: false, error: 'No connection for session', isRetryable: false };
     }
 
     try {
@@ -494,22 +650,30 @@ export class Agent extends EventEmitter {
       });
 
       if (response.status === 200 && response.body.length > 0) {
-        // If we got a response body, it might be a RESPONSE frame
         try {
           const responseFrame = JSON.parse(response.body.toString());
           if (responseFrame && responseFrame.type) {
-            // Process the response through the dispatcher
             await this.dispatcher.handleIncoming(responseFrame);
           }
         } catch {
-          // Not JSON or not a frame - that's OK
+          // Not a frame response
         }
       }
 
-      return response.status === 200;
+      if (response.status >= 500) {
+        return { success: false, error: `Server error: ${response.status}`, isRetryable: true };
+      }
+      if (response.status >= 400) {
+        return { success: false, error: `Client error: ${response.status}`, isRetryable: false };
+      }
+
+      return { success: true };
     } catch (err) {
-      this.bugReporter.reportError(err as Error, 'connection');
-      return false;
+      const error = (err as Error).message;
+      const isRetryable = error.includes('TIMEOUT') || 
+                          error.includes('ECONNREFUSED') || 
+                          error.includes('NETWORK');
+      return { success: false, error, isRetryable };
     }
   }
 
@@ -517,23 +681,14 @@ export class Agent extends EventEmitter {
   // Session Management
   // ============================================================================
 
-  /**
-   * Get session by ID
-   */
   getSession(sessionId: string): Session | undefined {
     return this.sessions.get(sessionId);
   }
 
-  /**
-   * Get all sessions
-   */
   getAllSessions(): Session[] {
     return this.sessions.getAll();
   }
 
-  /**
-   * Get stats
-   */
   getStats() {
     return {
       identity: this.identity,
@@ -542,6 +697,9 @@ export class Agent extends EventEmitter {
       connections: this.client.getStats(),
       dispatcher: this.dispatcher.getStats(),
       bugReporter: this.bugReporter.getStats(),
+      persistence: this.db ? this.db.getStats() : null,
+      outbox: this.outboxManager?.getStats() ?? null,
+      resume: this.resumeManager?.getStats() ?? null,
     };
   }
 
@@ -557,11 +715,9 @@ export class Agent extends EventEmitter {
     this.bugReporter.recordAction('handle_request', {
       method: req.method,
       path: req.path,
-      peer: req.peerFingerprint.slice(0, 16),
     });
     
     try {
-      // Handshake init
       if (req.path === '/handshake/init' && req.method === 'POST') {
         const init = JSON.parse(req.body.toString()) as HandshakeInit;
         const response = this.handshakeResponder.processInit(init);
@@ -573,18 +729,14 @@ export class Agent extends EventEmitter {
         return { status: 200, body: JSON.stringify(response) };
       }
       
-      // Handshake complete
       if (req.path === '/handshake/complete' && req.method === 'POST') {
         const complete = JSON.parse(req.body.toString()) as HandshakeComplete;
-        
-        // The peerNonce is now included in the complete message
         const result = this.handshakeResponder.processComplete(complete, complete.peerNonce);
         
         if (!result.success) {
           return { status: 400, body: JSON.stringify({ error: result.error }) };
         }
         
-        // Create session on server side
         const session = this.sessions.create(result.remoteAgent!);
         this.sessions.transition(session.id, SessionEvent.CONNECT);
         this.sessions.transition(session.id, SessionEvent.CONNECTED);
@@ -600,27 +752,45 @@ export class Agent extends EventEmitter {
         return { status: 200, body: JSON.stringify({ sessionId: session.id }) };
       }
       
-      // Message endpoint
       if (req.path === '/message' && req.method === 'POST') {
-        const frame = JSON.parse(req.body.toString());
+        const frame = JSON.parse(req.body.toString()) as AnyFrame;
         const validation = validateFrame(frame);
         
         if (!validation.valid) {
           return { status: 400, body: JSON.stringify({ error: validation.error }) };
         }
         
+        // Check for duplicate
+        if (this.db && this.db.isDuplicate(frame.messageId, frame.sessionId)) {
+          this.bugReporter.recordAction('dedupe_hit', { msgId: frame.messageId });
+          // Return success but don't process
+          return { status: 200, body: JSON.stringify({ ok: true, duplicate: true }) };
+        }
+        
+        // Mark as processed
+        if (this.db) {
+          this.db.markProcessed(frame.messageId, frame.sessionId);
+        }
+        
         // Process the message
         const responseFrame = await this.dispatcher.handleIncoming(frame);
         
+        // Send ACK for EVENTs
+        if (frame.type === MessageType.EVENT) {
+          const ackFrame = createEventFrame(frame.sessionId, 'ACK', { msgId: frame.messageId });
+          // Send ACK async (don't wait)
+          setImmediate(() => {
+            this.sendFrameDirect(frame.sessionId, ackFrame).catch(() => {});
+          });
+        }
+        
         if (responseFrame) {
-          // Send the response back directly
           return { status: 200, body: JSON.stringify(responseFrame) };
         }
         
         return { status: 200, body: JSON.stringify({ ok: true }) };
       }
       
-      // Health check
       if (req.path === '/health') {
         return {
           status: 200,
@@ -632,7 +802,6 @@ export class Agent extends EventEmitter {
         };
       }
       
-      // Unknown endpoint
       return { status: 404, body: 'Not Found' };
       
     } catch (err) {

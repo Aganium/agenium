@@ -13,8 +13,9 @@
 | 5 | ✅ COMPLETE | FSM integration |
 | 6 | ✅ COMPLETE | Message passing (REQUEST/RESPONSE/EVENT/ERROR) |
 | 7 | ✅ COMPLETE | DNS integration (agent:// resolution) |
-| 8 | ⏳ PENDING | Session persistence |
+| 8 | ✅ COMPLETE | Session persistence + reliable messaging |
 | 9 | ⏳ PENDING | Bug report server |
+| 10 | ⏳ PENDING | Production hardening |
 
 ## Key Requirements
 
