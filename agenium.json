@@ -1,0 +1,14 @@
+{
+  "agentId": "agent-mlgmnjb7",
+  "version": "0.1.0",
+  "dataDir": "./.agenium",
+  "dnsServer": "185.204.169.26",
+  "metricsPort": 9090,
+  "metricsHost": "127.0.0.1",
+  "bugReportServer": "http://localhost:3100/api/bug-reports",
+  "timeouts": {
+    "dnsLookupMs": 10000,
+    "handshakeMs": 10000,
+    "requestMs": 30000
+  }
+}

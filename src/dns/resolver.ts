@@ -36,8 +36,8 @@ const DEFAULT_CONFIG: DNSResolverConfig = {
   server: '185.204.169.26',
   timeoutMs: 10000,
   defaultTtlSeconds: 300,
-  useHttps: true,
-  port: 443,
+  useHttps: false,  // DNS server uses HTTP
+  port: 3000,       // DNS server port
 };
 
 // ============================================================================
@@ -80,7 +80,10 @@ export class DNSResolver {
       return { ok: false, error };
     }
 
-    const { name } = parsed;
+    const { name, tld } = parsed;
+    
+    // Build full domain name (name.tld or just name if no tld)
+    const fullName = tld ? `${name}.${tld}` : name;
 
     // Validate name
     if (!validateAgentName(name)) {
@@ -93,29 +96,29 @@ export class DNSResolver {
     }
 
     // Check cache
-    const cached = this.cache.get(name);
+    const cached = this.cache.get(fullName);
     if (cached && cached.expiresAt > now()) {
-      getBugReporter().recordAction('dns_cache_hit', { name, age: now() - cached.agent.resolvedAt });
+      getBugReporter().recordAction('dns_cache_hit', { name: fullName, age: now() - cached.agent.resolvedAt });
       return { ok: true, agent: cached.agent };
     }
 
     // Check for pending request (dedup)
-    const pending = this.pendingRequests.get(name);
+    const pending = this.pendingRequests.get(fullName);
     if (pending) {
       return pending;
     }
 
     // Make the request
-    const requestPromise = this.doResolve(name);
-    this.pendingRequests.set(name, requestPromise);
+    const requestPromise = this.doResolve(fullName);
+    this.pendingRequests.set(fullName, requestPromise);
 
     try {
       const result = await requestPromise;
       const duration = now() - startTime;
-      getBugReporter().recordAction('dns_resolved', { name, success: result.ok, durationMs: duration });
+      getBugReporter().recordAction('dns_resolved', { name: fullName, success: result.ok, durationMs: duration });
       return result;
     } finally {
-      this.pendingRequests.delete(name);
+      this.pendingRequests.delete(fullName);
     }
   }
 
@@ -131,7 +134,8 @@ export class DNSResolver {
       const portSuffix = (this.config.useHttps && this.config.port === 443) || 
                          (!this.config.useHttps && this.config.port === 80) 
                          ? '' : `:${this.config.port}`;
-      const url = `${protocol}://${this.config.server}${portSuffix}/api/agents/${encodeURIComponent(name)}`;
+      // DNS API endpoint: /agent/lookup/:domain
+      const url = `${protocol}://${this.config.server}${portSuffix}/agent/lookup/${encodeURIComponent(name)}`;
 
       const response = await fetch(url, {
         method: 'GET',
@@ -165,23 +169,26 @@ export class DNSResolver {
       }
 
       // Parse response
-      const data = await response.json() as DNSLookupResponse;
+      // DNS server returns: { success: true, data: { domain, endpoint, status, ... } }
+      const responseData = await response.json() as { success: boolean; data?: { domain: string; endpoint: string; status: string; health?: string; publicKey?: string; capabilities?: string[]; protocolVersions?: string[]; }; error?: { code: DNSErrorCode; message: string } };
 
-      if (!data.success || !data.agent) {
+      if (!responseData.success || !responseData.data) {
         return {
           ok: false,
-          error: data.error ?? {
+          error: responseData.error ?? {
             code: DNSErrorCode.NOT_FOUND,
             message: `Agent not found: ${name}`,
           },
         };
       }
 
+      const agentData = responseData.data;
+
       // Parse endpoint URL
       let host: string;
       let port: number;
       try {
-        const endpointUrl = new URL(data.agent.endpoint);
+        const endpointUrl = new URL(agentData.endpoint);
         host = endpointUrl.hostname;
         port = endpointUrl.port ? parseInt(endpointUrl.port) : (endpointUrl.protocol === 'https:' ? 443 : 80);
       } catch {
@@ -189,22 +196,22 @@ export class DNSResolver {
           ok: false,
           error: {
             code: DNSErrorCode.SERVER_ERROR,
-            message: `Invalid endpoint URL: ${data.agent.endpoint}`,
+            message: `Invalid endpoint URL: ${agentData.endpoint}`,
           },
         };
       }
 
       // Build resolved agent
-      const ttlSeconds = data.agent.ttl ?? this.config.defaultTtlSeconds;
+      const ttlSeconds = this.config.defaultTtlSeconds;
       const resolvedAgent: ResolvedAgent = {
-        name: data.agent.name,
-        publicKey: data.agent.publicKey,
-        endpoint: data.agent.endpoint,
+        name: agentData.domain,
+        publicKey: agentData.publicKey ?? '',
+        endpoint: agentData.endpoint,
         host,
         port,
-        description: data.agent.description,
-        capabilities: data.agent.capabilities,
-        protocolVersions: data.agent.protocolVersions,
+        description: undefined,
+        capabilities: agentData.capabilities ?? [],
+        protocolVersions: agentData.protocolVersions ?? ['1.0'],
         resolvedAt: now(),
         expiresAt: now() + (ttlSeconds * 1000),
       };
