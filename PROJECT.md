@@ -8,10 +8,10 @@
 |-------|--------|-------------|
 | 1 | ✅ COMPLETE | Architecture & Design |
 | 2 | ✅ COMPLETE | Project skeleton & core types |
-| 3 | ⏳ PENDING | Protocol resolver (agent://) |
-| 4 | ⏳ PENDING | Session manager (stateful) |
-| 5 | ⏳ PENDING | Bug reporter subsystem |
-| 6 | ⏳ PENDING | Transport layer (mTLS) |
+| 3 | ✅ COMPLETE | Transport layer (mTLS + HTTP/2) |
+| 4 | ✅ COMPLETE | Handshake protocol |
+| 5 | ✅ COMPLETE | FSM integration |
+| 6 | ⏳ PENDING | Message passing |
 | 7 | ⏳ PENDING | Integration & testing |
 
 ## Key Requirements
