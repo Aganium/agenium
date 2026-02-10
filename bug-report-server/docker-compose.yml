@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  bug-report-server:
+    build: .
+    ports:
+      - "3100:3100"
+    environment:
+      - PORT=3100
+      - DB_PATH=/data/bug-reports.db
+      - BUG_REPORT_TOKEN=${BUG_REPORT_TOKEN:-secure-production-token}
+    volumes:
+      - bug-report-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  bug-report-data:

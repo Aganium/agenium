@@ -21,6 +21,8 @@ import * as os from 'node:os';
 export interface BugReporterConfig {
   /** Bug report server URL */
   serverUrl: string;
+  /** Auth token for server */
+  authToken: string;
   /** Agent identifier */
   agentId: string;
   /** Agent version */
@@ -91,7 +93,8 @@ export class BugReporter {
 
   constructor(config: Partial<BugReporterConfig> = {}) {
     this.config = {
-      serverUrl: config.serverUrl ?? 'https://bugs.agenium.local/api/reports',
+      serverUrl: config.serverUrl ?? process.env.BUG_REPORT_URL ?? 'http://localhost:3100/api/bug-reports',
+      authToken: config.authToken ?? process.env.BUG_REPORT_TOKEN ?? 'dev-token-change-me',
       agentId: config.agentId ?? 'unknown-agent',
       agentVersion: config.agentVersion ?? '0.1.0',
       maxQueueSize: config.maxQueueSize ?? 100,
@@ -301,14 +304,40 @@ export class BugReporter {
   }
 
   private async upload(report: BugReport): Promise<boolean> {
-    // STUB: In production, this would POST to the server
-    // For now, just log and return success
     try {
-      console.log(`[BugReporter] Would upload report ${report.reportId} to ${this.config.serverUrl}`);
-      // Simulate network call
-      // await fetch(this.config.serverUrl, { method: 'POST', body: JSON.stringify(report) });
-      return true;
-    } catch {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
+      const response = await fetch(this.config.serverUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.config.authToken ?? 'dev-token'}`,
+          'X-Agent-Id': this.config.agentId,
+        },
+        body: JSON.stringify(report),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        console.error(`[BugReporter] Upload failed: ${response.status} ${response.statusText}`);
+        return false;
+      }
+
+      const result = await response.json() as { ok: boolean; fingerprint?: string };
+      if (result.ok) {
+        console.log(`[BugReporter] Uploaded ${report.reportId} → fingerprint: ${result.fingerprint}`);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') {
+        console.error(`[BugReporter] Upload timeout for ${report.reportId}`);
+      } else {
+        console.error(`[BugReporter] Upload error:`, err);
+      }
       return false;
     }
   }
