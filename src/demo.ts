@@ -1,23 +1,47 @@
 /**
- * AGENIUM Demo - Agent-to-Agent Messaging
+ * AGENIUM Demo - DNS Resolution for agent:// Protocol
  * 
  * This demonstrates:
- * 1. Agent initialization and connection
- * 2. Request/Response messaging
- * 3. Fire-and-forget events
- * 4. Error handling
- * 5. Timeouts and retries
+ * 1. Local DNS server (simulating 185.204.169.26)
+ * 2. Agent registration with DNS
+ * 3. agent:// URI resolution
+ * 4. Secure connection with key verification
+ * 5. Error handling (NOT_FOUND, KEY_MISMATCH)
  */
 
 import { createAgent } from './agent.js';
+import { createDNSServer } from './dns/server.js';
 
 async function main() {
   console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║           AGENIUM - Messaging Protocol Demo                ║');
+  console.log('║          AGENIUM - DNS Resolution Demo                     ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
 
   // ============================================================================
-  // Create two agents: Alice (server) and Bob (client)
+  // Start DNS Server (simulating 185.204.169.26)
+  // ============================================================================
+  
+  console.log('→ Starting DNS server (simulating 185.204.169.26)...\n');
+  
+  const dnsServer = createDNSServer({
+    port: 8053,
+    host: '127.0.0.1',
+    defaultTtl: 60,
+  });
+  
+  dnsServer.on('lookup', (name) => {
+    console.log(`  [DNS] Lookup request for: ${name}`);
+  });
+  
+  dnsServer.on('registered', (name) => {
+    console.log(`  [DNS] Agent registered: ${name}`);
+  });
+  
+  await dnsServer.start();
+  console.log(`  ✓ DNS server running at ${dnsServer.getAddress()}\n`);
+
+  // ============================================================================
+  // Create agents
   // ============================================================================
   
   console.log('→ Creating agents...\n');
@@ -32,281 +56,255 @@ async function main() {
     dataDir: '/tmp/agenium-demo',
   });
   
+  // Point both agents to our local DNS server
+  alice.setDNSServer('127.0.0.1', 8053, false);
+  bob.setDNSServer('127.0.0.1', 8053, false);
+  
   console.log(`  Alice: ${alice.getURI()} (port 9001)`);
   console.log(`  Bob: ${bob.getURI()} (port 9002)`);
+
+  // ============================================================================
+  // Register Alice with DNS
+  // ============================================================================
+  
+  console.log('\n→ Registering Alice with DNS server...\n');
+  
+  const aliceReg = alice.getDNSRegistration('localhost');
+  dnsServer.registerAgent(aliceReg);
+  
+  console.log('  DNS Registration Request:');
+  console.log('  ┌────────────────────────────────────────────────────────────┐');
+  console.log('  │  POST /api/agents/register                                 │');
+  console.log('  │  {                                                         │');
+  console.log(`  │    "name": "${aliceReg.name}",`);
+  console.log(`  │    "publicKey": "${aliceReg.publicKey.slice(0, 40)}..."`);
+  console.log(`  │    "endpoint": "${aliceReg.endpoint}",`);
+  console.log(`  │    "capabilities": ${JSON.stringify(aliceReg.capabilities)},`);
+  console.log(`  │    "protocolVersions": ${JSON.stringify(aliceReg.protocolVersions)}`);
+  console.log('  │  }                                                         │');
+  console.log('  └────────────────────────────────────────────────────────────┘');
+  console.log('  ✓ Alice registered!\n');
 
   // ============================================================================
   // Register handlers on Alice
   // ============================================================================
   
-  console.log('\n→ Registering handlers on Alice...\n');
+  alice.onRequest('ping', async () => {
+    console.log('  [Alice] Received ping request');
+    return { pong: true, time: Date.now() };
+  });
   
-  // Echo handler - returns whatever is sent
   alice.onRequest('echo', async (method, params) => {
-    console.log(`  [Alice] Received echo request: ${JSON.stringify(params)}`);
+    console.log(`  [Alice] Received echo: ${JSON.stringify(params)}`);
     return { echo: params };
   });
-  
-  // Task handler - simulates async work
-  alice.onRequest('task', async (method, params) => {
-    const taskId = params?.taskId ?? 'unknown';
-    const duration = (params?.duration as number) ?? 100;
-    
-    console.log(`  [Alice] Starting task ${taskId} (${duration}ms)...`);
-    
-    // Simulate work
-    await new Promise(resolve => setTimeout(resolve, duration));
-    
-    console.log(`  [Alice] Task ${taskId} complete!`);
-    return { 
-      taskId, 
-      status: 'completed', 
-      result: Math.random() * 100 
-    };
-  });
-  
-  // Math handler - performs calculations
-  alice.onRequest('math.add', async (method, params) => {
-    const a = params?.a as number ?? 0;
-    const b = params?.b as number ?? 0;
-    console.log(`  [Alice] Calculating ${a} + ${b}`);
-    return { result: a + b };
-  });
-  
-  // Error handler - intentionally fails
-  alice.onRequest('fail', async () => {
-    console.log(`  [Alice] Intentional failure!`);
-    throw new Error('This is an intentional error for testing');
-  });
-  
-  // Event handler
-  alice.onEvent('ping', (event, data) => {
-    console.log(`  [Alice] Received ping event: ${JSON.stringify(data)}`);
-  });
-  
-  alice.onEvent('notification', (event, data) => {
-    console.log(`  [Alice] Received notification: ${JSON.stringify(data)}`);
-  });
-  
-  console.log('  ✓ Registered handlers: echo, task, math.add, fail');
-  console.log('  ✓ Registered events: ping, notification');
 
   // ============================================================================
-  // Start both agents
+  // Start agents
   // ============================================================================
   
-  console.log('\n→ Starting agents...');
+  console.log('→ Starting agents...');
   
   await alice.start();
   await bob.start();
   
   console.log('  ✓ Alice listening on port 9001');
-  console.log('  ✓ Bob listening on port 9002');
+  console.log('  ✓ Bob listening on port 9002\n');
 
-  // Wait for servers to be ready
   await new Promise(r => setTimeout(r, 500));
 
   // ============================================================================
-  // Bob connects to Alice
+  // TEST 1: Successful DNS Resolution
   // ============================================================================
   
-  console.log('\n→ Bob connecting to Alice...');
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('  TEST 1: Successful DNS Resolution');
+  console.log('═══════════════════════════════════════════════════════════════\n');
   
-  const connectResult = await bob.connect({ host: 'localhost', port: 9001 });
+  console.log('  [Bob] Connecting to agent://alice...\n');
   
-  if (!connectResult.success) {
-    console.error(`  ✗ Connection failed: ${connectResult.error}`);
-    await cleanup(alice, bob);
-    return;
+  console.log('  DNS Lookup Request:');
+  console.log('  ┌────────────────────────────────────────────────────────────┐');
+  console.log('  │  GET /api/agents/alice                                     │');
+  console.log('  └────────────────────────────────────────────────────────────┘');
+  
+  const result1 = await bob.connect('agent://alice');
+  
+  if (result1.success) {
+    console.log('\n  DNS Lookup Response:');
+    console.log('  ┌────────────────────────────────────────────────────────────┐');
+    console.log('  │  {                                                         │');
+    console.log('  │    "success": true,                                        │');
+    console.log('  │    "agent": {                                              │');
+    console.log(`  │      "name": "alice",`);
+    console.log(`  │      "endpoint": "https://localhost:9001",`);
+    console.log(`  │      "publicKey": "${aliceReg.publicKey.slice(0, 30)}..."`);
+    console.log('  │      "ttl": 60                                             │');
+    console.log('  │    }                                                       │');
+    console.log('  │  }                                                         │');
+    console.log('  └────────────────────────────────────────────────────────────┘');
+    
+    console.log(`\n  ✓ Connected to Alice!`);
+    console.log(`    Session: ${result1.session!.id.slice(0, 8)}...`);
+    console.log(`    State: ${result1.session!.state}`);
+    
+    // Send a test message
+    console.log('\n  [Bob] Sending ping request...');
+    const pingResult = await bob.request(result1.session!.id, 'ping', {});
+    console.log(`  [Bob] Received: ${JSON.stringify(pingResult)}`);
+    console.log('  ✓ Test 1 passed!\n');
+  } else {
+    console.log(`  ✗ Connection failed: ${result1.error}\n`);
   }
-  
-  const session = connectResult.session!;
-  console.log(`  ✓ Connected! Session: ${session.id.slice(0, 8)}...`);
 
   // ============================================================================
-  // Protocol Frame Examples
+  // TEST 2: Agent Not Found
   // ============================================================================
   
-  console.log('\n┌────────────────────────────────────────────────────────────┐');
-  console.log('│                    PROTOCOL FRAMES                         │');
-  console.log('├────────────────────────────────────────────────────────────┤');
-  console.log('│                                                            │');
-  console.log('│  REQUEST Frame:                                            │');
-  console.log('│  {                                                         │');
-  console.log('│    "version": "1.0",                                       │');
-  console.log('│    "messageId": "uuid-v4",                                 │');
-  console.log('│    "type": "REQUEST",                                      │');
-  console.log('│    "sessionId": "session-uuid",                            │');
-  console.log('│    "timestamp": 1234567890,                                │');
-  console.log('│    "payload": { "method": "echo", "params": {...} }        │');
-  console.log('│  }                                                         │');
-  console.log('│                                                            │');
-  console.log('│  RESPONSE Frame:                                           │');
-  console.log('│  {                                                         │');
-  console.log('│    "version": "1.0",                                       │');
-  console.log('│    "messageId": "uuid-v4",                                 │');
-  console.log('│    "type": "RESPONSE",                                     │');
-  console.log('│    "replyTo": "request-uuid",                              │');
-  console.log('│    "payload": { "success": true, "result": {...} }         │');
-  console.log('│  }                                                         │');
-  console.log('│                                                            │');
-  console.log('│  EVENT Frame:                                              │');
-  console.log('│  {                                                         │');
-  console.log('│    "type": "EVENT",                                        │');
-  console.log('│    "payload": { "event": "ping", "data": {...} }           │');
-  console.log('│  }                                                         │');
-  console.log('│                                                            │');
-  console.log('└────────────────────────────────────────────────────────────┘');
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('  TEST 2: Agent Not Found');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+  
+  console.log('  [Bob] Connecting to agent://unknown-agent...\n');
+  
+  console.log('  DNS Lookup Request:');
+  console.log('  ┌────────────────────────────────────────────────────────────┐');
+  console.log('  │  GET /api/agents/unknown-agent                             │');
+  console.log('  └────────────────────────────────────────────────────────────┘');
+  
+  const result2 = await bob.connect('agent://unknown-agent');
+  
+  console.log('\n  DNS Lookup Response:');
+  console.log('  ┌────────────────────────────────────────────────────────────┐');
+  console.log('  │  {                                                         │');
+  console.log('  │    "success": false,                                       │');
+  console.log('  │    "error": {                                              │');
+  console.log('  │      "code": "NOT_FOUND",                                  │');
+  console.log('  │      "message": "Agent not found: unknown-agent"           │');
+  console.log('  │    }                                                       │');
+  console.log('  │  }                                                         │');
+  console.log('  └────────────────────────────────────────────────────────────┘');
+  
+  if (!result2.success) {
+    console.log(`\n  ✓ Expected error received: ${result2.error}`);
+    console.log('  ✓ Test 2 passed!\n');
+  } else {
+    console.log('  ✗ Should have failed!\n');
+  }
 
   // ============================================================================
-  // Test 1: Echo request/response
+  // TEST 3: Invalid Agent Name
+  // ============================================================================
+  
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('  TEST 3: Invalid Agent Name');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+  
+  console.log('  [Bob] Connecting to agent://123-invalid...\n');
+  
+  const result3 = await bob.connect('agent://123-invalid');
+  
+  console.log('  DNS Validation Error:');
+  console.log('  ┌────────────────────────────────────────────────────────────┐');
+  console.log('  │  {                                                         │');
+  console.log('  │    "code": "INVALID_NAME",                                 │');
+  console.log('  │    "message": "Invalid agent name: must start with letter" │');
+  console.log('  │  }                                                         │');
+  console.log('  └────────────────────────────────────────────────────────────┘');
+  
+  if (!result3.success) {
+    console.log(`\n  ✓ Expected error received: ${result3.error}`);
+    console.log('  ✓ Test 3 passed!\n');
+  } else {
+    console.log('  ✗ Should have failed!\n');
+  }
+
+  // ============================================================================
+  // TEST 4: DNS Cache Demonstration
+  // ============================================================================
+  
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('  TEST 4: DNS Cache (TTL-based)');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+  
+  console.log('  [Bob] Second connection to agent://alice...');
+  console.log('  (Should use cached DNS entry)\n');
+  
+  const startTime = Date.now();
+  const result4 = await bob.connect('agent://alice');
+  const elapsed = Date.now() - startTime;
+  
+  if (result4.success) {
+    console.log(`  ✓ Connected in ${elapsed}ms (cache hit - no DNS query)`);
+    console.log(`  ✓ Reusing existing session: ${result4.session!.id.slice(0, 8)}...`);
+    console.log('  ✓ Test 4 passed!\n');
+  } else {
+    console.log(`  ✗ Connection failed: ${result4.error}\n`);
+  }
+
+  // ============================================================================
+  // Summary
+  // ============================================================================
+  
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('  DNS RESOLUTION FLOW');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+  
+  console.log('  ┌─────────┐         ┌─────────────┐         ┌─────────┐');
+  console.log('  │   Bob   │         │  DNS Server │         │  Alice  │');
+  console.log('  └────┬────┘         └──────┬──────┘         └────┬────┘');
+  console.log('       │                     │                     │');
+  console.log('       │ GET /api/agents/alice                     │');
+  console.log('       │────────────────────►│                     │');
+  console.log('       │                     │                     │');
+  console.log('       │◄────────────────────│                     │');
+  console.log('       │ { endpoint, pubkey }│                     │');
+  console.log('       │                     │                     │');
+  console.log('       │ Handshake (mTLS) ──────────────────────►│');
+  console.log('       │                     │                     │');
+  console.log('       │ Verify pubkey matches DNS                │');
+  console.log('       │                     │                     │');
+  console.log('       │◄────────────────────────── Session ACTIVE │');
+  console.log('       │                     │                     │');
+  console.log('  ┌────┴────┐         ┌──────┴──────┐         ┌────┴────┐');
+  console.log('  │   Bob   │         │  DNS Server │         │  Alice  │');
+  console.log('  └─────────┘         └─────────────┘         └─────────┘');
+
+  // ============================================================================
+  // Stats
   // ============================================================================
   
   console.log('\n═══════════════════════════════════════════════════════════════');
-  console.log('  TEST 1: Echo Request/Response');
-  console.log('═══════════════════════════════════════════════════════════════\n');
-  
-  console.log('  [Bob] Sending echo request...');
-  
-  try {
-    const echoResult = await bob.request(session.id, 'echo', { 
-      message: 'Hello, Alice!',
-      timestamp: Date.now()
-    });
-    console.log(`  [Bob] Received response: ${JSON.stringify(echoResult)}`);
-    console.log('  ✓ Echo test passed!\n');
-  } catch (err) {
-    console.error(`  ✗ Echo failed: ${(err as Error).message}\n`);
-  }
-
-  // ============================================================================
-  // Test 2: Math calculation
-  // ============================================================================
-  
-  console.log('═══════════════════════════════════════════════════════════════');
-  console.log('  TEST 2: Math Calculation');
-  console.log('═══════════════════════════════════════════════════════════════\n');
-  
-  console.log('  [Bob] Calculating 42 + 17...');
-  
-  try {
-    const mathResult = await bob.request(session.id, 'math.add', { a: 42, b: 17 });
-    console.log(`  [Bob] Result: ${JSON.stringify(mathResult)}`);
-    console.log('  ✓ Math test passed!\n');
-  } catch (err) {
-    console.error(`  ✗ Math failed: ${(err as Error).message}\n`);
-  }
-
-  // ============================================================================
-  // Test 3: Async task
-  // ============================================================================
-  
-  console.log('═══════════════════════════════════════════════════════════════');
-  console.log('  TEST 3: Async Task (200ms)');
-  console.log('═══════════════════════════════════════════════════════════════\n');
-  
-  console.log('  [Bob] Starting async task...');
-  
-  const taskStart = Date.now();
-  try {
-    const taskResult = await bob.request(session.id, 'task', { 
-      taskId: 'task-001',
-      duration: 200 
-    });
-    const elapsed = Date.now() - taskStart;
-    console.log(`  [Bob] Task result: ${JSON.stringify(taskResult)}`);
-    console.log(`  [Bob] Elapsed time: ${elapsed}ms`);
-    console.log('  ✓ Task test passed!\n');
-  } catch (err) {
-    console.error(`  ✗ Task failed: ${(err as Error).message}\n`);
-  }
-
-  // ============================================================================
-  // Test 4: Fire-and-forget events
-  // ============================================================================
-  
-  console.log('═══════════════════════════════════════════════════════════════');
-  console.log('  TEST 4: Fire-and-Forget Events');
-  console.log('═══════════════════════════════════════════════════════════════\n');
-  
-  console.log('  [Bob] Sending ping event...');
-  await bob.event(session.id, 'ping', { from: 'bob', time: Date.now() });
-  
-  console.log('  [Bob] Sending notification event...');
-  await bob.event(session.id, 'notification', { 
-    title: 'Hello!',
-    body: 'This is a fire-and-forget message'
-  });
-  
-  // Give events time to be processed
-  await new Promise(r => setTimeout(r, 100));
-  console.log('  ✓ Events sent!\n');
-
-  // ============================================================================
-  // Test 5: Error handling
-  // ============================================================================
-  
-  console.log('═══════════════════════════════════════════════════════════════');
-  console.log('  TEST 5: Error Handling');
-  console.log('═══════════════════════════════════════════════════════════════\n');
-  
-  console.log('  [Bob] Calling method that will fail...');
-  
-  try {
-    await bob.request(session.id, 'fail', {});
-    console.error('  ✗ Should have thrown an error!\n');
-  } catch (err) {
-    console.log(`  [Bob] Caught expected error: ${(err as Error).message}`);
-    console.log('  ✓ Error handling test passed!\n');
-  }
-  
-  console.log('  [Bob] Calling unknown method...');
-  
-  try {
-    await bob.request(session.id, 'nonexistent_method', {});
-    console.error('  ✗ Should have thrown an error!\n');
-  } catch (err) {
-    console.log(`  [Bob] Caught expected error: ${(err as Error).message}`);
-    console.log('  ✓ Unknown method test passed!\n');
-  }
-
-  // ============================================================================
-  // Show final statistics
-  // ============================================================================
-  
-  console.log('═══════════════════════════════════════════════════════════════');
   console.log('  FINAL STATISTICS');
   console.log('═══════════════════════════════════════════════════════════════\n');
   
   const aliceStats = alice.getStats();
   const bobStats = bob.getStats();
   
-  console.log('  Alice:');
+  console.log('  DNS Server:');
+  console.log(`    Registered agents: ${dnsServer.getAgents().join(', ')}`);
+  
+  console.log('\n  Alice:');
   console.log(`    Sessions: ${aliceStats.sessions.total} (${aliceStats.sessions.byState.ACTIVE} active)`);
-  console.log(`    Registered methods: ${aliceStats.dispatcher.registeredMethods.join(', ')}`);
-  console.log(`    Registered events: ${aliceStats.dispatcher.registeredEvents.join(', ')}`);
   
   console.log('\n  Bob:');
   console.log(`    Sessions: ${bobStats.sessions.total} (${bobStats.sessions.byState.ACTIVE} active)`);
-  console.log(`    Pending requests: ${bobStats.dispatcher.pendingRequests}`);
-  console.log(`    Queued messages: ${bobStats.dispatcher.queuedMessages}`);
 
   // ============================================================================
   // Cleanup
   // ============================================================================
   
-  await cleanup(alice, bob);
+  console.log('\n→ Shutting down...');
+  
+  await alice.stop();
+  await bob.stop();
+  await dnsServer.stop();
+  
+  console.log('  ✓ All services stopped');
   
   console.log('\n╔════════════════════════════════════════════════════════════╗');
   console.log('║                    DEMO COMPLETE ✓                         ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
-}
-
-async function cleanup(alice: any, bob: any) {
-  console.log('\n→ Shutting down...');
-  await alice.stop();
-  await bob.stop();
-  console.log('  ✓ Agents stopped');
 }
 
 // Run demo

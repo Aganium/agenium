@@ -12,7 +12,9 @@
 | 4 | ✅ COMPLETE | Handshake protocol |
 | 5 | ✅ COMPLETE | FSM integration |
 | 6 | ✅ COMPLETE | Message passing (REQUEST/RESPONSE/EVENT/ERROR) |
-| 7 | ⏳ PENDING | DNS integration & persistence |
+| 7 | ✅ COMPLETE | DNS integration (agent:// resolution) |
+| 8 | ⏳ PENDING | Session persistence |
+| 9 | ⏳ PENDING | Bug report server |
 
 ## Key Requirements
 

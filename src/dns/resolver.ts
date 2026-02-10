@@ -1,12 +1,22 @@
 /**
- * DNS Resolver Module
- * Resolves agent:// URIs to AgentEndpoint via DNS system
+ * DNS Resolver
+ * Resolves agent:// URIs to endpoints via DNS system at 185.204.169.26
  */
 
-import { AgentEndpoint, AgentID, parseAgentURI, now } from '../core/types.js';
+import {
+  ResolvedAgent,
+  ResolveResult,
+  DNSLookupResponse,
+  DNSErrorCode,
+  validateAgentName,
+  parseAgentURI,
+} from './types.js';
+import { verifyAgentSignature } from '../crypto/keys.js';
+import { getBugReporter } from '../bug-report/reporter.js';
+import { now } from '../core/types.js';
 
 // ============================================================================
-// Types
+// Configuration
 // ============================================================================
 
 export interface DNSResolverConfig {
@@ -14,39 +24,29 @@ export interface DNSResolverConfig {
   server: string;
   /** Request timeout in ms */
   timeoutMs: number;
-  /** Cache TTL in seconds */
-  cacheTtlSeconds: number;
+  /** Default cache TTL in seconds (used if server doesn't provide TTL) */
+  defaultTtlSeconds: number;
+  /** Whether to use HTTPS (true) or HTTP (false) */
+  useHttps: boolean;
+  /** Port for DNS server */
+  port: number;
 }
 
-export interface DNSResponse {
-  success: boolean;
-  agent?: {
-    name: string;
-    publicKey: string;
-    description?: string;
-    endpoint: string;
-    certFingerprint?: string;
-    protocolVersions: string[];
-    capabilities: string[];
-    ttl: number;
-  };
-  error?: {
-    code: string;
-    message: string;
-  };
-}
+const DEFAULT_CONFIG: DNSResolverConfig = {
+  server: '185.204.169.26',
+  timeoutMs: 10000,
+  defaultTtlSeconds: 300,
+  useHttps: true,
+  port: 443,
+};
 
-export type ResolveResult = {
-  ok: true;
-  endpoint: AgentEndpoint;
-} | {
-  ok: false;
-  error: ResolveError;
-}
+// ============================================================================
+// Cache Entry
+// ============================================================================
 
-export interface ResolveError {
-  code: 'INVALID_URI' | 'NOT_FOUND' | 'DNS_ERROR' | 'TIMEOUT' | 'NETWORK_ERROR';
-  message: string;
+interface CacheEntry {
+  agent: ResolvedAgent;
+  expiresAt: number;
 }
 
 // ============================================================================
@@ -55,110 +55,84 @@ export interface ResolveError {
 
 export class DNSResolver {
   private config: DNSResolverConfig;
-  private cache: Map<string, { endpoint: AgentEndpoint; expiresAt: number }>;
+  private cache: Map<string, CacheEntry> = new Map();
+  private pendingRequests: Map<string, Promise<ResolveResult>> = new Map();
 
   constructor(config: Partial<DNSResolverConfig> = {}) {
-    this.config = {
-      server: config.server ?? '185.204.169.26',
-      timeoutMs: config.timeoutMs ?? 10000,
-      cacheTtlSeconds: config.cacheTtlSeconds ?? 300,
-    };
-    this.cache = new Map();
+    this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
   /**
-   * Resolve an agent:// URI to an endpoint
+   * Resolve an agent:// URI to agent info
    */
   async resolve(agentUri: string): Promise<ResolveResult> {
+    const startTime = now();
+    getBugReporter().recordAction('dns_resolve', { uri: agentUri });
+
     // Parse URI
     const parsed = parseAgentURI(agentUri);
     if (!parsed) {
-      return {
-        ok: false,
-        error: {
-          code: 'INVALID_URI',
-          message: `Invalid agent URI: ${agentUri}. Expected format: agent://<name>`,
-        },
+      const error = {
+        code: DNSErrorCode.INVALID_NAME,
+        message: `Invalid agent URI: ${agentUri}. Expected format: agent://<name>`,
       };
+      getBugReporter().report('protocol', 'DNS_INVALID_URI', error.message);
+      return { ok: false, error };
     }
 
     const { name } = parsed;
 
+    // Validate name
+    if (!validateAgentName(name)) {
+      const error = {
+        code: DNSErrorCode.INVALID_NAME,
+        message: `Invalid agent name: ${name}. Must start with letter, 1-63 chars, alphanumeric with _ -`,
+      };
+      getBugReporter().report('protocol', 'DNS_INVALID_NAME', error.message);
+      return { ok: false, error };
+    }
+
     // Check cache
     const cached = this.cache.get(name);
     if (cached && cached.expiresAt > now()) {
-      return { ok: true, endpoint: cached.endpoint };
+      getBugReporter().recordAction('dns_cache_hit', { name, age: now() - cached.agent.resolvedAt });
+      return { ok: true, agent: cached.agent };
     }
 
-    // Query DNS
+    // Check for pending request (dedup)
+    const pending = this.pendingRequests.get(name);
+    if (pending) {
+      return pending;
+    }
+
+    // Make the request
+    const requestPromise = this.doResolve(name);
+    this.pendingRequests.set(name, requestPromise);
+
     try {
-      const response = await this.queryDNS(name);
-      
-      if (!response.success || !response.agent) {
-        return {
-          ok: false,
-          error: {
-            code: 'NOT_FOUND',
-            message: response.error?.message ?? `Agent not found: ${name}`,
-          },
-        };
-      }
-
-      const agent = response.agent;
-      const endpoint: AgentEndpoint = {
-        agentId: {
-          name: agent.name,
-          publicKey: agent.publicKey,
-          description: agent.description,
-        },
-        url: agent.endpoint,
-        certFingerprint: agent.certFingerprint,
-        protocolVersions: agent.protocolVersions,
-        capabilities: agent.capabilities,
-        ttl: agent.ttl,
-        resolvedAt: now(),
-      };
-
-      // Cache the result
-      this.cache.set(name, {
-        endpoint,
-        expiresAt: now() + (agent.ttl * 1000),
-      });
-
-      return { ok: true, endpoint };
-    } catch (err) {
-      const error = err as Error;
-      
-      if (error.name === 'AbortError') {
-        return {
-          ok: false,
-          error: {
-            code: 'TIMEOUT',
-            message: `DNS query timed out after ${this.config.timeoutMs}ms`,
-          },
-        };
-      }
-
-      return {
-        ok: false,
-        error: {
-          code: 'NETWORK_ERROR',
-          message: `DNS query failed: ${error.message}`,
-        },
-      };
+      const result = await requestPromise;
+      const duration = now() - startTime;
+      getBugReporter().recordAction('dns_resolved', { name, success: result.ok, durationMs: duration });
+      return result;
+    } finally {
+      this.pendingRequests.delete(name);
     }
   }
 
   /**
-   * Query the DNS server for agent info
+   * Perform the actual DNS lookup
    */
-  private async queryDNS(agentName: string): Promise<DNSResponse> {
+  private async doResolve(name: string): Promise<ResolveResult> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
 
     try {
-      const url = `https://${this.config.server}/api/agents/${encodeURIComponent(agentName)}`;
-      
+      const protocol = this.config.useHttps ? 'https' : 'http';
+      const portSuffix = (this.config.useHttps && this.config.port === 443) || 
+                         (!this.config.useHttps && this.config.port === 80) 
+                         ? '' : `:${this.config.port}`;
+      const url = `${protocol}://${this.config.server}${portSuffix}/api/agents/${encodeURIComponent(name)}`;
+
       const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -168,31 +142,131 @@ export class DNSResolver {
         signal: controller.signal,
       });
 
+      clearTimeout(timeout);
+
+      // Handle HTTP errors
       if (!response.ok) {
         if (response.status === 404) {
           return {
-            success: false,
-            error: { code: 'NOT_FOUND', message: `Agent '${agentName}' not found` },
+            ok: false,
+            error: {
+              code: DNSErrorCode.NOT_FOUND,
+              message: `Agent not found: ${name}`,
+            },
           };
         }
         return {
-          success: false,
-          error: { code: 'DNS_ERROR', message: `DNS returned ${response.status}` },
+          ok: false,
+          error: {
+            code: DNSErrorCode.SERVER_ERROR,
+            message: `DNS server returned ${response.status}: ${response.statusText}`,
+          },
         };
       }
 
-      const data = await response.json() as DNSResponse['agent'];
-      return { success: true, agent: data };
-    } finally {
+      // Parse response
+      const data = await response.json() as DNSLookupResponse;
+
+      if (!data.success || !data.agent) {
+        return {
+          ok: false,
+          error: data.error ?? {
+            code: DNSErrorCode.NOT_FOUND,
+            message: `Agent not found: ${name}`,
+          },
+        };
+      }
+
+      // Parse endpoint URL
+      let host: string;
+      let port: number;
+      try {
+        const endpointUrl = new URL(data.agent.endpoint);
+        host = endpointUrl.hostname;
+        port = endpointUrl.port ? parseInt(endpointUrl.port) : (endpointUrl.protocol === 'https:' ? 443 : 80);
+      } catch {
+        return {
+          ok: false,
+          error: {
+            code: DNSErrorCode.SERVER_ERROR,
+            message: `Invalid endpoint URL: ${data.agent.endpoint}`,
+          },
+        };
+      }
+
+      // Build resolved agent
+      const ttlSeconds = data.agent.ttl ?? this.config.defaultTtlSeconds;
+      const resolvedAgent: ResolvedAgent = {
+        name: data.agent.name,
+        publicKey: data.agent.publicKey,
+        endpoint: data.agent.endpoint,
+        host,
+        port,
+        description: data.agent.description,
+        capabilities: data.agent.capabilities,
+        protocolVersions: data.agent.protocolVersions,
+        resolvedAt: now(),
+        expiresAt: now() + (ttlSeconds * 1000),
+      };
+
+      // Cache the result
+      this.cache.set(name, {
+        agent: resolvedAgent,
+        expiresAt: resolvedAgent.expiresAt,
+      });
+
+      return { ok: true, agent: resolvedAgent };
+
+    } catch (err) {
       clearTimeout(timeout);
+      const error = err as Error;
+
+      if (error.name === 'AbortError') {
+        getBugReporter().report('timeout', 'DNS_TIMEOUT', `DNS query timed out after ${this.config.timeoutMs}ms`);
+        return {
+          ok: false,
+          error: {
+            code: DNSErrorCode.TIMEOUT,
+            message: `DNS query timed out after ${this.config.timeoutMs}ms`,
+          },
+        };
+      }
+
+      getBugReporter().report('connection', 'DNS_NETWORK_ERROR', error.message);
+      return {
+        ok: false,
+        error: {
+          code: DNSErrorCode.NETWORK_ERROR,
+          message: `DNS query failed: ${error.message}`,
+        },
+      };
     }
+  }
+
+  /**
+   * Verify that a connected agent's public key matches DNS record
+   */
+  async verifyAgentKey(name: string, presentedKey: string): Promise<boolean> {
+    const result = await this.resolve(`agent://${name}`);
+    if (!result.ok) {
+      getBugReporter().report('protocol', 'DNS_VERIFY_FAILED', `Cannot verify key: ${result.error.message}`);
+      return false;
+    }
+
+    if (result.agent.publicKey !== presentedKey) {
+      getBugReporter().report('protocol', 'KEY_MISMATCH', 
+        `Public key mismatch for agent ${name}. DNS: ${result.agent.publicKey.slice(0, 20)}..., presented: ${presentedKey.slice(0, 20)}...`);
+      return false;
+    }
+
+    return true;
   }
 
   /**
    * Invalidate a cached entry
    */
-  invalidate(agentName: string): void {
-    this.cache.delete(agentName);
+  invalidate(name: string): void {
+    this.cache.delete(name);
   }
 
   /**
@@ -205,16 +279,43 @@ export class DNSResolver {
   /**
    * Get cache statistics
    */
-  getCacheStats(): { size: number; entries: string[] } {
-    return {
-      size: this.cache.size,
-      entries: Array.from(this.cache.keys()),
-    };
+  getCacheStats(): {
+    size: number;
+    entries: Array<{ name: string; expiresIn: number }>;
+  } {
+    const entries: Array<{ name: string; expiresIn: number }> = [];
+    const currentTime = now();
+
+    for (const [name, entry] of this.cache) {
+      entries.push({
+        name,
+        expiresIn: Math.max(0, entry.expiresAt - currentTime),
+      });
+    }
+
+    return { size: this.cache.size, entries };
+  }
+
+  /**
+   * Prune expired cache entries
+   */
+  pruneCache(): number {
+    const currentTime = now();
+    let pruned = 0;
+
+    for (const [name, entry] of this.cache) {
+      if (entry.expiresAt <= currentTime) {
+        this.cache.delete(name);
+        pruned++;
+      }
+    }
+
+    return pruned;
   }
 }
 
 // ============================================================================
-// Singleton instance
+// Singleton
 // ============================================================================
 
 let defaultResolver: DNSResolver | null = null;

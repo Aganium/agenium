@@ -10,8 +10,20 @@ export * from './core/index.js';
 // Cryptography
 export * from './crypto/index.js';
 
-// DNS resolution
-export * from './dns/index.js';
+// DNS resolution - explicit exports to avoid conflicts
+export {
+  // Types
+  DNSErrorCode,
+  ResolvedAgent,
+  validateAgentName,
+  // Resolver
+  DNSResolver,
+  getResolver,
+  resetResolver,
+  // Server (for testing)
+  DNSServer,
+  createDNSServer,
+} from './dns/index.js';
 
 // Session state management
 export * from './state/index.js';

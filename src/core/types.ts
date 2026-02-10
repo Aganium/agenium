@@ -21,9 +21,10 @@ export interface AgentID {
 
 /**
  * Parse agent:// URI to extract agent name
+ * Agent names must start with a letter and be 1-63 chars
  */
 export function parseAgentURI(uri: string): { name: string } | null {
-  const match = uri.match(/^agent:\/\/([a-zA-Z0-9_-]+)$/);
+  const match = uri.match(/^agent:\/\/([a-zA-Z][a-zA-Z0-9_-]{0,62})$/);
   if (!match) return null;
   return { name: match[1] };
 }

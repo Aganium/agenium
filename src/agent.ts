@@ -21,7 +21,7 @@ import {
 
 import { SessionManager, createSessionManager } from './state/session-manager.js';
 import { BugReporter, getBugReporter } from './bug-report/reporter.js';
-import { DNSResolver } from './dns/resolver.js';
+import { DNSResolver, ResolvedAgent, DNSErrorCode } from './dns/index.js';
 
 import { TransportServer, createServer, IncomingRequest } from './transport/server.js';
 import { TransportClient, createClient } from './transport/client.js';
@@ -187,6 +187,38 @@ export class Agent extends EventEmitter {
     return `agent://${this.identity.name}`;
   }
 
+  /**
+   * Get endpoint URL for DNS registration
+   */
+  getEndpoint(host: string = 'localhost'): string {
+    return `https://${host}:${this.config.listenPort}`;
+  }
+
+  /**
+   * Get DNS registration info
+   */
+  getDNSRegistration(host: string = 'localhost') {
+    return {
+      name: this.identity.name,
+      publicKey: this.identity.publicKey,
+      endpoint: this.getEndpoint(host),
+      description: this.identity.description,
+      capabilities: ['messaging'],
+      protocolVersions: ['1.0'],
+    };
+  }
+
+  /**
+   * Configure DNS resolver
+   */
+  setDNSServer(server: string, port: number = 443, useHttps: boolean = true): void {
+    this.resolver = new DNSResolver({
+      server,
+      port,
+      useHttps,
+    });
+  }
+
   // ============================================================================
   // Lifecycle
   // ============================================================================
@@ -262,18 +294,25 @@ export class Agent extends EventEmitter {
     let host: string;
     let port: number;
     let remoteAgentName: string;
+    let resolvedAgent: ResolvedAgent | null = null;
     
     if (typeof target === 'string') {
       // agent:// URI - resolve via DNS
       const result = await this.resolver.resolve(target);
       if (!result.ok) {
-        return { success: false, error: result.error.message };
+        this.bugReporter.report('connection', `DNS_${result.error.code}`, result.error.message);
+        return { success: false, error: `DNS resolution failed: ${result.error.message}` };
       }
       
-      const url = new URL(result.endpoint.url);
-      host = url.hostname;
-      port = parseInt(url.port) || 443;
-      remoteAgentName = result.endpoint.agentId.name;
+      resolvedAgent = result.agent;
+      host = resolvedAgent.host;
+      port = resolvedAgent.port;
+      remoteAgentName = resolvedAgent.name;
+      
+      this.bugReporter.recordAction('dns_resolved', {
+        name: resolvedAgent.name,
+        endpoint: resolvedAgent.endpoint,
+      });
     } else {
       // Direct connection
       host = target.host;
@@ -343,6 +382,16 @@ export class Agent extends EventEmitter {
       // Update session with remote identity
       const updatedSession = this.sessions.get(session.id)!;
       updatedSession.remoteAgent = responseData.agentId;
+      
+      // Verify public key if we resolved via DNS
+      if (resolvedAgent) {
+        if (responseData.agentId.publicKey !== resolvedAgent.publicKey) {
+          this.bugReporter.report('protocol', 'KEY_MISMATCH', 
+            `Public key mismatch for ${remoteAgentName}. DNS: ${resolvedAgent.publicKey.slice(0, 20)}..., handshake: ${responseData.agentId.publicKey.slice(0, 20)}...`);
+          throw new Error(`Security error: Public key mismatch for ${remoteAgentName}. Connection rejected.`);
+        }
+        this.bugReporter.recordAction('key_verified', { agent: remoteAgentName });
+      }
       
       // Store connection info for messaging
       this.sessionConnections.set(session.id, { host, port });
