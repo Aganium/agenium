@@ -21,12 +21,26 @@ export interface AgentID {
 
 /**
  * Parse agent:// URI to extract agent name
+ * Formats:
+ *   - agent://alice (simple name)
+ *   - agent://alice.agent (with TLD)
+ *   - agent://alice.bot (with TLD)
  * Agent names must start with a letter and be 1-63 chars
  */
-export function parseAgentURI(uri: string): { name: string } | null {
-  const match = uri.match(/^agent:\/\/([a-zA-Z][a-zA-Z0-9_-]{0,62})$/);
-  if (!match) return null;
-  return { name: match[1] };
+export function parseAgentURI(uri: string): { name: string; tld?: string } | null {
+  // Full format with TLD: agent://name.tld
+  const withTld = uri.match(/^agent:\/\/([a-zA-Z][a-zA-Z0-9_-]{0,62})\.([a-zA-Z]+)$/);
+  if (withTld) {
+    return { name: withTld[1], tld: withTld[2] };
+  }
+
+  // Simple format: agent://name
+  const simple = uri.match(/^agent:\/\/([a-zA-Z][a-zA-Z0-9_-]{0,62})$/);
+  if (simple) {
+    return { name: simple[1] };
+  }
+
+  return null;
 }
 
 // ============================================================================

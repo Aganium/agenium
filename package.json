@@ -1,15 +1,37 @@
 {
   "name": "agenium",
   "version": "0.1.0",
-  "description": "Local, stateful agent-to-agent client software",
+  "description": "Local, stateful agent-to-agent client software with automatic bug reporting",
   "type": "module",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "agenium": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "test": "node --test dist/**/*.test.js",
-    "typecheck": "tsc --noEmit"
+    "e2e": "npx tsx e2e-test.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -17,10 +39,22 @@
   "keywords": [
     "agent",
     "a2a",
+    "agent-to-agent",
     "daemon",
-    "stateful"
+    "stateful",
+    "mTLS",
+    "protocol"
   ],
+  "author": "Agenium Team",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/agenium/agenium.git"
+  },
+  "bugs": {
+    "url": "https://github.com/agenium/agenium/issues"
+  },
+  "homepage": "https://github.com/agenium/agenium#readme",
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.11.0",
