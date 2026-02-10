@@ -6,6 +6,7 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { BugReportDB } from './db.js';
 import { BugReportSchema, IngestResponse } from './schema.js';
+import { serverMetrics, getMetricsText } from './metrics.js';
 
 // ============================================================================
 // Configuration
@@ -116,6 +117,7 @@ export class BugReportServer {
   private server: ReturnType<typeof createServer> | null = null;
   private config: ServerConfig;
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
+  private startTime: number = Date.now();
 
   constructor(config: Partial<ServerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -183,22 +185,47 @@ export class BugReportServer {
     try {
       // Health check (no auth)
       if (path === '/health' && method === 'GET') {
-        return sendJson(res, 200, { ok: true, timestamp: Date.now() });
+        const stats = this.db.getStats();
+        serverMetrics.uniqueFingerprints.set(stats.uniqueFingerprints);
+        return sendJson(res, 200, { 
+          ok: true, 
+          timestamp: Date.now(),
+          uptime: Math.floor((Date.now() - this.startTime) / 1000),
+          stats: {
+            totalReports: stats.totalReports,
+            uniqueFingerprints: stats.uniqueFingerprints,
+            reportsLast24h: stats.reportsLast24h,
+          }
+        });
       }
 
-      // Stats endpoint (no auth, public)
+      // Prometheus metrics (no auth)
+      if (path === '/metrics' && method === 'GET') {
+        const stats = this.db.getStats();
+        serverMetrics.uniqueFingerprints.set(stats.uniqueFingerprints);
+        res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4' });
+        res.end(getMetricsText());
+        return;
+      }
+
+      // Stats endpoint (now requires auth for security)
       if (path === '/api/stats' && method === 'GET') {
+        if (!this.checkAuth(req)) {
+          return sendJson(res, 401, { error: 'Unauthorized', message: 'Stats require authentication' });
+        }
         return sendJson(res, 200, this.db.getStats());
       }
 
       // Auth check for other endpoints
       if (!this.checkAuth(req)) {
+        serverMetrics.authFailed.inc();
         return sendJson(res, 401, { error: 'Unauthorized', message: 'Invalid or missing token' });
       }
 
       // Rate limiting
       const agentId = getAgentId(req);
       if (!this.rateLimiter.isAllowed(agentId)) {
+        serverMetrics.rateLimited.inc();
         return sendJson(res, 429, { error: 'Too Many Requests', message: 'Rate limit exceeded' });
       }
 
@@ -252,7 +279,21 @@ export class BugReportServer {
       }
 
       const report = result.data;
-      const { fingerprint, isNew, occurrences } = this.db.ingest(report);
+      let ingestResult;
+      try {
+        ingestResult = this.db.ingest(report);
+      } catch (err) {
+        serverMetrics.dbWriteFailed.inc();
+        throw err;
+      }
+
+      const { fingerprint, isNew, occurrences } = ingestResult;
+
+      // Track metrics
+      serverMetrics.reportsIngested.inc();
+      if (!isNew) {
+        serverMetrics.reportsDeduplicated.inc();
+      }
 
       const response: IngestResponse = {
         ok: true,

@@ -226,11 +226,90 @@ describe('Server', () => {
     assert.ok(Array.isArray(data));
   });
 
-  it('should get stats without auth', async () => {
+  it('should require auth for stats', async () => {
     const res = await fetch(`http://localhost:${port}/api/stats`);
+    assert.strictEqual(res.status, 401);
+  });
+
+  it('should get stats with auth', async () => {
+    const res = await fetch(`http://localhost:${port}/api/stats`, {
+      headers: { 'Authorization': `Bearer ${TEST_TOKEN}` },
+    });
     assert.strictEqual(res.status, 200);
-    const data = await res.json();
+    const data = await res.json() as { totalReports: number };
     assert.ok(data.totalReports !== undefined);
+  });
+});
+
+// ============================================================================
+// Metrics Tests
+// ============================================================================
+
+describe('Metrics', () => {
+  let server: BugReportServer;
+  const port = 3198; // Different test port
+
+  before(async () => {
+    server = new BugReportServer({
+      port,
+      dbPath: ':memory:',
+      authToken: TEST_TOKEN,
+    });
+    await server.start();
+  });
+
+  after(async () => {
+    await server.stop();
+  });
+
+  it('should expose /metrics endpoint', async () => {
+    const res = await fetch(`http://localhost:${port}/metrics`);
+    assert.strictEqual(res.status, 200);
+    assert.ok(res.headers.get('content-type')?.includes('text/plain'));
+    
+    const text = await res.text();
+    assert.ok(text.includes('bug_reports_ingested_total'));
+    assert.ok(text.includes('bug_reports_dedup_total'));
+    assert.ok(text.includes('bug_reports_server_uptime_seconds'));
+  });
+
+  it('should track ingestion metrics', async () => {
+    // Ingest a report
+    const report = makeBugReport({ errorCode: 'METRICS_TEST' });
+    await fetch(`http://localhost:${port}/api/bug-reports`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${TEST_TOKEN}`,
+      },
+      body: JSON.stringify(report),
+    });
+
+    // Check metrics
+    const res = await fetch(`http://localhost:${port}/metrics`);
+    const text = await res.text();
+    
+    // Should have at least 1 ingested
+    assert.ok(text.includes('bug_reports_ingested_total'));
+  });
+
+  it('should require auth for /api/stats', async () => {
+    const res = await fetch(`http://localhost:${port}/api/stats`);
+    assert.strictEqual(res.status, 401);
+  });
+
+  it('should return stats with auth', async () => {
+    const res = await fetch(`http://localhost:${port}/api/stats`, {
+      headers: { 'Authorization': `Bearer ${TEST_TOKEN}` },
+    });
+    assert.strictEqual(res.status, 200);
+  });
+
+  it('should include uptime in /health', async () => {
+    const res = await fetch(`http://localhost:${port}/health`);
+    const health = await res.json() as { uptime: number; stats: unknown };
+    assert.ok(health.uptime >= 0);
+    assert.ok(health.stats !== undefined);
   });
 });
 

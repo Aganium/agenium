@@ -82,3 +82,13 @@ export {
 
 // High-level Agent API
 export { Agent, createAgent, type AgentConfig, type ConnectResult } from './agent.js';
+
+// Metrics and observability
+export {
+  metrics,
+  getHealth,
+  getMetricsText,
+  setHealthProvider,
+  type HealthStatus,
+} from './metrics/index.js';
+export { MetricsServer } from './metrics/server.js';

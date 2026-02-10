@@ -13,6 +13,7 @@ import {
   now,
 } from '../core/types.js';
 import * as os from 'node:os';
+import { metrics } from '../metrics/index.js';
 
 // ============================================================================
 // Types
@@ -277,6 +278,7 @@ export class BugReporter {
       queuedAt: now(),
       isCrash,
     });
+    metrics.bugReportsQueueDepth.set(this.queue.length);
   }
 
   private async processBatch(): Promise<void> {
@@ -329,10 +331,14 @@ export class BugReporter {
       const result = await response.json() as { ok: boolean; fingerprint?: string };
       if (result.ok) {
         console.log(`[BugReporter] Uploaded ${report.reportId} → fingerprint: ${result.fingerprint}`);
+        metrics.bugReportsSentTotal.inc({ result: 'success' });
+        metrics.bugReportsLastUploadAt.set(now());
         return true;
       }
+      metrics.bugReportsSentTotal.inc({ result: 'failure' });
       return false;
     } catch (err) {
+      metrics.bugReportsSentTotal.inc({ result: 'failure' });
       if ((err as Error).name === 'AbortError') {
         console.error(`[BugReporter] Upload timeout for ${report.reportId}`);
       } else {
