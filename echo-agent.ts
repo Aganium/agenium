@@ -250,6 +250,71 @@ function startServer(): void {
       return;
     }
     
+    // AGENIUM message endpoint (frame-based messaging)
+    if (reqPath === '/message' && method === 'POST') {
+      let body = '';
+      
+      stream.on('data', (chunk) => {
+        body += chunk.toString();
+      });
+      
+      stream.on('end', () => {
+        try {
+          const frame = JSON.parse(body);
+          console.log(`[EchoAgent] Message: type=${frame.type}, method=${frame.payload?.method || 'N/A'}`);
+          
+          // Handle REQUEST frames (type can be 0 or 'REQUEST')
+          if (frame.type === 0 || frame.type === 'REQUEST') {
+            const method = frame.payload?.method;
+            const params = frame.payload?.params || {};
+            
+            let result: unknown;
+            
+            if (method === 'echo') {
+              result = { echo: params.message, timestamp: Date.now() };
+            } else if (method === 'notify') {
+              result = { ack: true };
+            } else {
+              result = { error: `Unknown method: ${method}` };
+            }
+            
+            // Build response frame (use same type format as request)
+            const responseFrame = {
+              version: '1.0',
+              messageId: `resp-${Date.now()}`,
+              replyTo: frame.messageId,  // Critical: matches original request messageId
+              type: typeof frame.type === 'string' ? 'RESPONSE' : 2,
+              sessionId: frame.sessionId,
+              timestamp: Date.now(),
+              payload: { success: true, result },
+            };
+            
+            stream.respond({ ':status': 200, 'content-type': 'application/json' });
+            stream.end(JSON.stringify(responseFrame));
+            return;
+          }
+          
+          // Handle EVENT frames (fire-and-forget, type can be 1 or 'EVENT')
+          if (frame.type === 1 || frame.type === 'EVENT') {
+            console.log(`[EchoAgent] Event received: ${frame.payload?.event}`);
+            stream.respond({ ':status': 200 });
+            stream.end();
+            return;
+          }
+          
+          // Unknown frame type
+          stream.respond({ ':status': 400, 'content-type': 'application/json' });
+          stream.end(JSON.stringify({ error: `Unknown frame type: ${frame.type}` }));
+        } catch (err) {
+          console.error('[EchoAgent] Message error:', err);
+          stream.respond({ ':status': 400, 'content-type': 'application/json' });
+          stream.end(JSON.stringify({ error: 'Invalid message frame' }));
+        }
+      });
+      
+      return;
+    }
+    
     // JSON-RPC endpoint
     if (reqPath === '/rpc' && method === 'POST') {
       let body = '';
