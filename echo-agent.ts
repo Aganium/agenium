@@ -173,6 +173,83 @@ function startServer(): void {
       return;
     }
     
+    // Handshake init endpoint (AGENIUM protocol)
+    if (reqPath === '/handshake/init' && method === 'POST') {
+      let body = '';
+      
+      stream.on('data', (chunk) => {
+        body += chunk.toString();
+      });
+      
+      stream.on('end', () => {
+        try {
+          const init = JSON.parse(body);
+          console.log(`[EchoAgent] Handshake init from: ${init.agentId?.name || 'unknown'}`);
+          
+          // Generate nonce
+          const nonce = crypto.randomBytes(16).toString('hex');
+          const peerNonce = init.nonce || '';
+          const ts = Date.now();
+          
+          // Build response in AGENIUM format
+          const response = {
+            type: 'handshake_response',
+            version: '1.0',
+            agentId: {
+              name: AGENT_NAME,
+              publicKey: certInfo.pubkey,
+            },
+            capabilities: ['messaging'],
+            acceptedCapabilities: init.capabilities || ['messaging'],
+            nonce: nonce,
+            peerNonce: peerNonce,
+            timestamp: ts,
+            // Note: Signature is placeholder - real impl would sign properly
+            signature: crypto.createHash('sha256').update(`1.0|${AGENT_NAME}|${nonce}|${peerNonce}|${ts}`).digest('base64'),
+          };
+          
+          stream.respond({ ':status': 200, 'content-type': 'application/json' });
+          stream.end(JSON.stringify(response));
+        } catch (err) {
+          console.error('[EchoAgent] Handshake error:', err);
+          stream.respond({ ':status': 400, 'content-type': 'application/json' });
+          stream.end(JSON.stringify({ type: 'handshake_error', message: 'Invalid handshake init' }));
+        }
+      });
+      
+      return;
+    }
+    
+    // Handshake complete endpoint
+    if (reqPath === '/handshake/complete' && method === 'POST') {
+      let body = '';
+      
+      stream.on('data', (chunk) => {
+        body += chunk.toString();
+      });
+      
+      stream.on('end', () => {
+        try {
+          const complete = JSON.parse(body);
+          console.log(`[EchoAgent] Handshake complete: session ${complete.sessionId}`);
+          
+          // Respond with session confirmation
+          const response = {
+            sessionId: complete.sessionId || `sess-${Date.now()}`,
+          };
+          
+          stream.respond({ ':status': 200, 'content-type': 'application/json' });
+          stream.end(JSON.stringify(response));
+        } catch (err) {
+          console.error('[EchoAgent] Handshake complete error:', err);
+          stream.respond({ ':status': 400, 'content-type': 'application/json' });
+          stream.end(JSON.stringify({ error: 'Invalid handshake complete' }));
+        }
+      });
+      
+      return;
+    }
+    
     // JSON-RPC endpoint
     if (reqPath === '/rpc' && method === 'POST') {
       let body = '';

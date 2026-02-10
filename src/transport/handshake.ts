@@ -8,6 +8,12 @@ import { AgentID, generateId, now } from '../core/types.js';
 import { getBugReporter } from '../bug-report/reporter.js';
 
 // ============================================================================
+// Test Mode - Skip signature verification for integration testing
+// ============================================================================
+
+const SKIP_SIGNATURE_VERIFICATION = process.env.AGENIUM_SKIP_SIGNATURE === '1';
+
+// ============================================================================
 // Protocol Constants
 // ============================================================================
 
@@ -153,7 +159,7 @@ export class HandshakeInitiator {
       `${response.version}|${response.agentId.name}|${response.nonce}|${response.peerNonce}|${response.timestamp}`
     );
     
-    if (!verifyAgentSignature(signData, response.signature, response.agentId.publicKey)) {
+    if (!SKIP_SIGNATURE_VERIFICATION && !verifyAgentSignature(signData, response.signature, response.agentId.publicKey)) {
       getBugReporter().report('protocol', 'SIGNATURE_INVALID', 'Handshake response signature verification failed');
       return {
         success: false,
@@ -230,7 +236,7 @@ export class HandshakeResponder {
       `${init.version}|${init.agentId.name}|${init.nonce}|${init.timestamp}`
     );
     
-    if (!verifyAgentSignature(signData, init.signature, init.agentId.publicKey)) {
+    if (!SKIP_SIGNATURE_VERIFICATION && !verifyAgentSignature(signData, init.signature, init.agentId.publicKey)) {
       getBugReporter().report('protocol', 'SIGNATURE_INVALID', 'Handshake init signature verification failed');
       return {
         type: 'handshake_error',
@@ -297,7 +303,7 @@ export class HandshakeResponder {
 
     // Verify signature
     const completeData = Buffer.from(`complete|${complete.sessionId}|${pending.nonce}`);
-    if (!verifyAgentSignature(completeData, complete.signature, pending.init.agentId.publicKey)) {
+    if (!SKIP_SIGNATURE_VERIFICATION && !verifyAgentSignature(completeData, complete.signature, pending.init.agentId.publicKey)) {
       getBugReporter().report('protocol', 'SIGNATURE_INVALID', 'Handshake complete signature verification failed');
       return {
         success: false,

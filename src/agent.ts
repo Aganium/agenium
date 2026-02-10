@@ -422,8 +422,9 @@ export class Agent extends EventEmitter {
       const updatedSession = this.sessions.get(session.id)!;
       updatedSession.remoteAgent = responseData.agentId;
       
-      // Verify public key if DNS resolved
-      if (resolvedAgent && responseData.agentId.publicKey !== resolvedAgent.publicKey) {
+      // Verify public key if DNS resolved AND provides a key (pinning)
+      // Skip check if DNS doesn't provide a key (no pinning)
+      if (resolvedAgent && resolvedAgent.publicKey && responseData.agentId.publicKey !== resolvedAgent.publicKey) {
         this.bugReporter.report('protocol', 'KEY_MISMATCH', 
           `Public key mismatch for ${remoteAgentName}`);
         throw new Error(`Security error: Public key mismatch for ${remoteAgentName}`);
