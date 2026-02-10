@@ -14,6 +14,7 @@ import {
 } from '../core/types.js';
 import * as os from 'node:os';
 import { metrics } from '../metrics/index.js';
+import { getConfig } from '../config.js';
 
 // ============================================================================
 // Types
@@ -308,7 +309,8 @@ export class BugReporter {
   private async upload(report: BugReport): Promise<boolean> {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout
+      const timeoutMs = getConfig().timeouts.bugReportUploadMs;
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
       const response = await fetch(this.config.serverUrl, {
         method: 'POST',

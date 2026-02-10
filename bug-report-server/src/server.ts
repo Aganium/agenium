@@ -14,22 +14,26 @@ import { serverMetrics, getMetricsText } from './metrics.js';
 
 export interface ServerConfig {
   port: number;
+  host: string;  // Bind address: '127.0.0.1' (default) or '0.0.0.0'
   dbPath: string;
   authToken: string;
   rateLimit: {
     windowMs: number;
     maxRequests: number;
   };
+  shutdownTimeoutMs: number;
 }
 
 const DEFAULT_CONFIG: ServerConfig = {
   port: parseInt(process.env.PORT ?? '3100'),
+  host: process.env.METRICS_HOST ?? '127.0.0.1',
   dbPath: process.env.DB_PATH ?? './bug-reports.db',
   authToken: process.env.BUG_REPORT_TOKEN ?? 'dev-token-change-me',
   rateLimit: {
     windowMs: 60 * 1000, // 1 minute
     maxRequests: 100,
   },
+  shutdownTimeoutMs: 5000,
 };
 
 // ============================================================================
@@ -118,6 +122,8 @@ export class BugReportServer {
   private config: ServerConfig;
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private startTime: number = Date.now();
+  private activeConnections: Set<import('node:net').Socket> = new Set();
+  private isShuttingDown: boolean = false;
 
   constructor(config: Partial<ServerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -134,8 +140,8 @@ export class BugReportServer {
   start(): Promise<void> {
     return new Promise((resolve) => {
       this.server = createServer((req, res) => this.handleRequest(req, res));
-      this.server.listen(this.config.port, () => {
-        console.log(`[BugReportServer] Listening on port ${this.config.port}`);
+      this.server.listen(this.config.port, this.config.host, () => {
+        console.log(`[BugReportServer] Listening on ${this.config.host}:${this.config.port}`);
         resolve();
       });
 
@@ -143,24 +149,66 @@ export class BugReportServer {
       this.cleanupInterval = setInterval(() => {
         this.rateLimiter.cleanup();
       }, 60 * 1000);
+
+      // Track active connections for graceful shutdown
+      this.server.on('connection', (socket) => {
+        this.activeConnections.add(socket);
+        socket.on('close', () => this.activeConnections.delete(socket));
+      });
     });
   }
 
   /**
-   * Stop the server
+   * Graceful shutdown
+   * 1. Stop accepting new connections
+   * 2. Wait for active requests to complete (with timeout)
+   * 3. Close database cleanly
    */
-  stop(): Promise<void> {
+  async stop(): Promise<void> {
+    if (this.isShuttingDown) return;
+    this.isShuttingDown = true;
+
+    console.log('[BugReportServer] Starting graceful shutdown...');
+
+    // Clear intervals
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+
+    // Stop accepting new connections
     return new Promise((resolve) => {
-      if (this.cleanupInterval) {
-        clearInterval(this.cleanupInterval);
+      if (!this.server) {
+        this.db.close();
+        return resolve();
       }
-      this.db.close();
-      if (this.server) {
-        this.server.close(() => resolve());
-      } else {
+
+      // Close the server (stop accepting new connections)
+      this.server.close(() => {
+        console.log('[BugReportServer] Server closed');
+        this.db.close();
+        console.log('[BugReportServer] Database closed');
         resolve();
-      }
+      });
+
+      // Force close connections after timeout
+      const forceClose = setTimeout(() => {
+        console.log(`[BugReportServer] Force closing ${this.activeConnections.size} connections`);
+        for (const socket of this.activeConnections) {
+          socket.destroy();
+        }
+      }, this.config.shutdownTimeoutMs);
+
+      // Clear timeout if server closes cleanly
+      this.server.once('close', () => clearTimeout(forceClose));
     });
+  }
+
+  /**
+   * Check if server is ready to accept requests
+   */
+  isReady(): boolean {
+    return !this.isShuttingDown && this.server !== null;
   }
 
   /**

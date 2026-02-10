@@ -92,3 +92,22 @@ export {
   type HealthStatus,
 } from './metrics/index.js';
 export { MetricsServer } from './metrics/server.js';
+
+// Configuration
+export {
+  getConfig,
+  setConfig,
+  CircuitBreaker,
+  DEFAULT_CONFIG,
+  type AgeniumConfig,
+  type TimeoutConfig,
+  type PoolConfig,
+  type CircuitBreakerConfig,
+} from './config.js';
+
+// Shutdown management
+export {
+  getShutdownManager,
+  registerStandardHooks,
+  type ShutdownConfig,
+} from './shutdown.js';

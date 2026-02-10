@@ -8,38 +8,63 @@ import { getHealth, getMetricsText } from './index.js';
 
 export interface MetricsServerConfig {
   port: number;
+  host: string;  // Bind address: '127.0.0.1' (default) or '0.0.0.0'
   version: string;
+  shutdownTimeoutMs: number;
 }
 
 export class MetricsServer {
   private server: ReturnType<typeof createServer> | null = null;
   private config: MetricsServerConfig;
+  private activeConnections: Set<import('node:net').Socket> = new Set();
+  private isShuttingDown: boolean = false;
 
   constructor(config: Partial<MetricsServerConfig> = {}) {
     this.config = {
       port: config.port ?? parseInt(process.env.METRICS_PORT ?? '9090'),
+      host: config.host ?? process.env.METRICS_HOST ?? '127.0.0.1',
       version: config.version ?? '0.1.0',
+      shutdownTimeoutMs: config.shutdownTimeoutMs ?? 2000,
     };
   }
 
   start(): Promise<void> {
     return new Promise((resolve) => {
       this.server = createServer((req, res) => this.handleRequest(req, res));
-      this.server.listen(this.config.port, () => {
-        console.log(`[MetricsServer] Listening on port ${this.config.port}`);
+      
+      this.server.on('connection', (socket) => {
+        this.activeConnections.add(socket);
+        socket.on('close', () => this.activeConnections.delete(socket));
+      });
+
+      this.server.listen(this.config.port, this.config.host, () => {
+        console.log(`[MetricsServer] Listening on ${this.config.host}:${this.config.port}`);
         resolve();
       });
     });
   }
 
-  stop(): Promise<void> {
+  async stop(): Promise<void> {
+    if (this.isShuttingDown) return;
+    this.isShuttingDown = true;
+
     return new Promise((resolve) => {
-      if (this.server) {
-        this.server.close(() => resolve());
-      } else {
+      if (!this.server) return resolve();
+
+      this.server.close(() => resolve());
+
+      // Force close after timeout
+      setTimeout(() => {
+        for (const socket of this.activeConnections) {
+          socket.destroy();
+        }
         resolve();
-      }
+      }, this.config.shutdownTimeoutMs);
     });
+  }
+
+  isReady(): boolean {
+    return !this.isShuttingDown && this.server !== null;
   }
 
   private handleRequest(req: IncomingMessage, res: ServerResponse): void {
