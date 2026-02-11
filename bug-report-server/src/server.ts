@@ -1,9 +1,10 @@
 /**
  * Bug Report Server - HTTP Server
- * Minimal HTTP server with rate limiting and token auth
+ * Minimal HTTP server with rate limiting, token auth, and HMAC verification
  */
 
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { BugReportDB } from './db.js';
 import { BugReportSchema, IngestResponse } from './schema.js';
 import { serverMetrics, getMetricsText } from './metrics.js';
@@ -17,6 +18,8 @@ export interface ServerConfig {
   host: string;  // Bind address: '127.0.0.1' (default) or '0.0.0.0'
   dbPath: string;
   authToken: string;
+  hmacSecrets: Map<string, string>;  // agentId -> HMAC secret
+  timestampToleranceMs: number;  // Max age of request timestamp (replay protection)
   rateLimit: {
     windowMs: number;
     maxRequests: number;
@@ -24,11 +27,28 @@ export interface ServerConfig {
   shutdownTimeoutMs: number;
 }
 
+// Parse HMAC secrets from env: BUG_SERVER_HMAC_SECRETS="agent1:secret1,agent2:secret2"
+function parseHmacSecrets(): Map<string, string> {
+  const secrets = new Map<string, string>();
+  const raw = process.env.BUG_SERVER_HMAC_SECRETS ?? '';
+  if (!raw) return secrets;
+  
+  for (const pair of raw.split(',')) {
+    const [agentId, secret] = pair.split(':');
+    if (agentId && secret) {
+      secrets.set(agentId.trim(), secret.trim());
+    }
+  }
+  return secrets;
+}
+
 const DEFAULT_CONFIG: ServerConfig = {
   port: parseInt(process.env.PORT ?? '3100'),
   host: process.env.METRICS_HOST ?? '127.0.0.1',
   dbPath: process.env.DB_PATH ?? './bug-reports.db',
   authToken: process.env.BUG_REPORT_TOKEN ?? 'dev-token-change-me',
+  hmacSecrets: parseHmacSecrets(),
+  timestampToleranceMs: parseInt(process.env.TIMESTAMP_TOLERANCE_MS ?? '300000'),  // 5 minutes default
   rateLimit: {
     windowMs: 60 * 1000, // 1 minute
     maxRequests: 100,
@@ -82,14 +102,20 @@ function sendJson(res: ServerResponse, status: number, data: unknown): void {
   res.end(JSON.stringify(data));
 }
 
-function parseBody(req: IncomingMessage): Promise<unknown> {
+interface ParsedBody {
+  raw: string;
+  parsed: unknown;
+}
+
+function parseBody(req: IncomingMessage): Promise<ParsedBody> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     req.on('data', chunk => chunks.push(chunk));
     req.on('end', () => {
       try {
-        const body = Buffer.concat(chunks).toString();
-        resolve(body ? JSON.parse(body) : {});
+        const raw = Buffer.concat(chunks).toString();
+        const parsed = raw ? JSON.parse(raw) : {};
+        resolve({ raw, parsed });
       } catch (e) {
         reject(new Error('Invalid JSON body'));
       }
@@ -100,6 +126,79 @@ function parseBody(req: IncomingMessage): Promise<unknown> {
 
 function getAgentId(req: IncomingMessage): string {
   return req.headers['x-agent-id'] as string ?? 'unknown';
+}
+
+// ============================================================================
+// HMAC Signature Verification
+// ============================================================================
+
+interface HmacVerificationResult {
+  valid: boolean;
+  error?: string;
+}
+
+function verifyHmacSignature(
+  body: string,
+  signature: string | undefined,
+  timestamp: string | undefined,
+  agentId: string,
+  hmacSecrets: Map<string, string>,
+  toleranceMs: number
+): HmacVerificationResult {
+  // If no HMAC secrets configured, skip verification (backward compat)
+  if (hmacSecrets.size === 0) {
+    return { valid: true };
+  }
+  
+  // Get secret for this agent
+  const secret = hmacSecrets.get(agentId) ?? hmacSecrets.get('*');  // '*' = wildcard
+  if (!secret) {
+    return { valid: true };  // No secret for this agent, skip verification
+  }
+  
+  // Signature required if secret exists
+  if (!signature) {
+    return { valid: false, error: 'Missing X-Signature header' };
+  }
+  
+  // Timestamp required for replay protection
+  if (!timestamp) {
+    return { valid: false, error: 'Missing X-Timestamp header' };
+  }
+  
+  // Validate timestamp freshness
+  const ts = parseInt(timestamp, 10);
+  if (isNaN(ts)) {
+    return { valid: false, error: 'Invalid X-Timestamp format' };
+  }
+  
+  const now = Date.now();
+  if (Math.abs(now - ts) > toleranceMs) {
+    return { valid: false, error: 'Request timestamp too old or too far in future' };
+  }
+  
+  // Compute expected signature
+  const expectedSignature = createHmac('sha256', secret)
+    .update(body)
+    .digest('hex');
+  
+  // Constant-time comparison
+  try {
+    const sigBuffer = Buffer.from(signature, 'hex');
+    const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+    
+    if (sigBuffer.length !== expectedBuffer.length) {
+      return { valid: false, error: 'Invalid signature' };
+    }
+    
+    if (!timingSafeEqual(sigBuffer, expectedBuffer)) {
+      return { valid: false, error: 'Invalid signature' };
+    }
+  } catch {
+    return { valid: false, error: 'Invalid signature format' };
+  }
+  
+  return { valid: true };
 }
 
 function parseTimeWindow(window?: string): number {
@@ -315,8 +414,30 @@ export class BugReportServer {
    */
   private async handleIngest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
-      const body = await parseBody(req);
-      const result = BugReportSchema.safeParse(body);
+      const { raw, parsed } = await parseBody(req);
+      
+      // Get agent ID from body for HMAC lookup
+      const agentId = (parsed as Record<string, unknown>)?.agentId as string ?? 'unknown';
+      
+      // Verify HMAC signature if configured
+      const hmacResult = verifyHmacSignature(
+        raw,
+        req.headers['x-signature'] as string | undefined,
+        req.headers['x-timestamp'] as string | undefined,
+        agentId,
+        this.config.hmacSecrets,
+        this.config.timestampToleranceMs
+      );
+      
+      if (!hmacResult.valid) {
+        serverMetrics.authFailed.inc();
+        return sendJson(res, 401, {
+          error: 'Unauthorized',
+          message: hmacResult.error ?? 'HMAC verification failed',
+        });
+      }
+      
+      const result = BugReportSchema.safeParse(parsed);
 
       if (!result.success) {
         return sendJson(res, 400, {
@@ -350,7 +471,7 @@ export class BugReportServer {
         isNew,
       };
 
-      console.log(`[BugReportServer] Ingested report ${report.reportId} (fp: ${fingerprint}, new: ${isNew}, total: ${occurrences})`);
+      console.log(`[BugReportServer] Ingested report ${report.reportId} from ${agentId} (fp: ${fingerprint}, new: ${isNew}, total: ${occurrences})`);
 
       sendJson(res, 200, response);
     } catch (err) {
