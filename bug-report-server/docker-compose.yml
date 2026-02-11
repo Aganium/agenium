@@ -7,8 +7,14 @@ services:
       - "3100:3100"
     environment:
       - PORT=3100
+      - METRICS_HOST=0.0.0.0
       - DB_PATH=/data/bug-reports.db
       - BUG_REPORT_TOKEN=${BUG_REPORT_TOKEN:-secure-production-token}
+      # HMAC secrets for secure clients (format: "agentId:secret,agentId2:secret2")
+      # Use "*:secret" for wildcard (all agents)
+      - BUG_SERVER_HMAC_SECRETS=${BUG_SERVER_HMAC_SECRETS:-}
+      # Timestamp tolerance for replay protection (default: 5 min)
+      - TIMESTAMP_TOLERANCE_MS=${TIMESTAMP_TOLERANCE_MS:-300000}
     volumes:
       - bug-report-data:/data
     restart: unless-stopped
