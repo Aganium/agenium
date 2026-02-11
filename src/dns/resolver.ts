@@ -80,10 +80,10 @@ export class DNSResolver {
       return { ok: false, error };
     }
 
-    const { name, tld } = parsed;
+    const { name } = parsed;
     
-    // Build full domain name (name.tld or just name if no tld)
-    const fullName = tld ? `${name}.${tld}` : name;
+    // Full name is now just the name (no TLD concept in new format)
+    const fullName = name;
 
     // Validate name
     if (!validateAgentName(name)) {

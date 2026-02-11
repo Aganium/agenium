@@ -140,5 +140,5 @@ export function validateAgentName(name: string): boolean {
   return AGENT_NAME_REGEX.test(name);
 }
 
-// Re-export parseAgentURI from core types for convenience
-export { parseAgentURI } from '../core/types.js';
+// Re-export agent URI utilities from core types for convenience
+export { parseAgentURI, isValidAgentURI, toAgentURI } from '../core/types.js';

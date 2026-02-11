@@ -21,26 +21,43 @@ export interface AgentID {
 
 /**
  * Parse agent:// URI to extract agent name
- * Formats:
- *   - agent://alice (simple name)
- *   - agent://alice.agent (with TLD)
- *   - agent://alice.bot (with TLD)
- * Agent names must start with a letter and be 1-63 chars
+ * Format: agent://name
+ * - Length: 2-50 characters
+ * - Characters: lowercase alphanumeric, hyphens, unicode (IDN)
+ * - Must not start or end with hyphen
+ * @example agent://alice, agent://my-agent, agent://bot123
  */
-export function parseAgentURI(uri: string): { name: string; tld?: string } | null {
-  // Full format with TLD: agent://name.tld
-  const withTld = uri.match(/^agent:\/\/([a-zA-Z][a-zA-Z0-9_-]{0,62})\.([a-zA-Z]+)$/);
-  if (withTld) {
-    return { name: withTld[1], tld: withTld[2] };
-  }
+export function parseAgentURI(uri: string): { name: string } | null {
+  if (!uri.startsWith('agent://')) return null;
+  
+  const name = uri.slice(8).toLowerCase();
+  
+  // Validate length
+  if (name.length < 2 || name.length > 50) return null;
+  
+  // Must not start/end with hyphen
+  if (name.startsWith('-') || name.endsWith('-')) return null;
+  
+  // IDN: allow lowercase, digits, hyphen, unicode
+  // Regex: starts with alphanumeric/unicode, middle can have hyphens, ends with alphanumeric/unicode
+  const valid = /^[a-z0-9\u0080-\uffff]([a-z0-9\u0080-\uffff-]*[a-z0-9\u0080-\uffff])?$/i.test(name);
+  if (!valid) return null;
 
-  // Simple format: agent://name
-  const simple = uri.match(/^agent:\/\/([a-zA-Z][a-zA-Z0-9_-]{0,62})$/);
-  if (simple) {
-    return { name: simple[1] };
-  }
+  return { name };
+}
 
-  return null;
+/**
+ * Validate if a string is a valid agent:// URI
+ */
+export function isValidAgentURI(uri: string): boolean {
+  return parseAgentURI(uri) !== null;
+}
+
+/**
+ * Convert a name to agent:// URI format
+ */
+export function toAgentURI(name: string): string {
+  return `agent://${name.toLowerCase()}`;
 }
 
 // ============================================================================
