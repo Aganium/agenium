@@ -40,21 +40,22 @@
     "agent",
     "a2a",
     "agent-to-agent",
-    "daemon",
-    "stateful",
-    "mTLS",
-    "protocol"
+    "protocol",
+    "dns",
+    "discovery",
+    "ai-agent",
+    "mcp"
   ],
   "author": "Agenium Team",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/agenium/agenium.git"
+    "url": "https://github.com/Aganium/agenium.git"
   },
   "bugs": {
-    "url": "https://github.com/agenium/agenium/issues"
+    "url": "https://github.com/Aganium/agenium/issues"
   },
-  "homepage": "https://github.com/agenium/agenium#readme",
+  "homepage": "https://agenium.net",
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.11.0",

@@ -122,7 +122,7 @@ test('toUnifiedReport - includes environment', () => {
 
 test('toUnifiedReport - includes stack_trace', () => {
   const report = toUnifiedReport(makeBugReport());
-  assert(report.stack_trace?.includes('at connect'), 'stack_trace included');
+  assert(report.stack_trace?.includes('at connect') === true, 'stack_trace included');
 });
 
 test('toUnifiedReport - includes optional trace_id', () => {

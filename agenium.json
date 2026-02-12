@@ -5,7 +5,7 @@
   "dnsServer": "185.204.169.26",
   "metricsPort": 9090,
   "metricsHost": "127.0.0.1",
-  "bugReportServer": "http://localhost:3100/api/bug-reports",
+  "bugReportServer": "http://130.185.123.153:3100/api/reports",
   "timeouts": {
     "dnsLookupMs": 10000,
     "handshakeMs": 10000,
