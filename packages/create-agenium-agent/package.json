@@ -1,0 +1,40 @@
+{
+  "name": "create-agenium-agent",
+  "version": "1.0.0",
+  "description": "Scaffold an AGENIUM agent in under 3 minutes",
+  "bin": {
+    "create-agenium-agent": "./dist/index.js"
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "agenium",
+    "agent",
+    "a2a",
+    "scaffold",
+    "create",
+    "cli"
+  ],
+  "author": "AGENIUM <team@agenium.net>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Aganium/agenium"
+  },
+  "dependencies": {
+    "prompts": "^2.4.2"
+  },
+  "devDependencies": {
+    "@types/prompts": "^2.4.9",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}
