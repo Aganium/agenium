@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as readline from 'node:readline';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const VERSION = '0.1.0';
@@ -69,50 +70,334 @@ Documentation: https://github.com/agenium/agenium
 // Commands
 // ============================================================================
 
-async function cmdInit(): Promise<void> {
-  log('Initializing Agenium agent...\n');
+// ============================================================================
+// Interactive Prompt Helpers
+// ============================================================================
+
+function ask(rl: readline.Interface, question: string, defaultVal?: string): Promise<string> {
+  const suffix = defaultVal ? ` (${defaultVal})` : '';
+  return new Promise((resolve) => {
+    rl.question(`  ${question}${suffix}: `, (answer) => {
+      resolve(answer.trim() || defaultVal || '');
+    });
+  });
+}
+
+function askChoice(rl: readline.Interface, question: string, choices: string[], defaultIdx = 0): Promise<number> {
+  return new Promise((resolve) => {
+    console.log(`\n  ${question}`);
+    choices.forEach((c, i) => {
+      const marker = i === defaultIdx ? '❯' : ' ';
+      console.log(`    ${marker} ${i + 1}. ${c}`);
+    });
+    rl.question(`  Choose [1-${choices.length}] (${defaultIdx + 1}): `, (answer) => {
+      const num = parseInt(answer.trim()) - 1;
+      resolve(num >= 0 && num < choices.length ? num : defaultIdx);
+    });
+  });
+}
+
+// ============================================================================
+// Agent Templates
+// ============================================================================
+
+const TEMPLATES: Record<string, { desc: string; code: (name: string, description: string) => string }> = {
+  echo: {
+    desc: 'Echo agent — mirrors messages back (great for testing)',
+    code: (name, description) => `#!/usr/bin/env npx tsx
+/**
+ * agent://${name} — ${description}
+ * Built with AGENIUM (https://agenium.net)
+ */
+import { createAgent } from 'agenium';
+
+const agent = createAgent('${name}', {
+  listenPort: parseInt(process.env.PORT ?? '9001'),
+  tools: [
+    {
+      name: 'echo',
+      description: 'Echo back the message you send',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          message: { type: 'string', description: 'Message to echo' },
+        },
+        required: ['message'],
+      },
+      handler: async (input) => ({
+        echo: (input as any).message,
+        timestamp: new Date().toISOString(),
+      }),
+    },
+    {
+      name: 'ping',
+      description: 'Health check',
+      inputSchema: { type: 'object', properties: {} },
+      handler: async () => ({
+        pong: true,
+        uptime: Math.round(process.uptime()),
+      }),
+    },
+  ],
+});
+
+agent.on('started', ({ name, port }) => {
+  console.log(\`\\n🤖 agent://\${name} started on port \${port}\`);
+  console.log('   Ready to receive connections!\\n');
+});
+
+agent.on('connection', ({ sessionId, remoteAgent }) => {
+  console.log(\`📡 Connection from \${remoteAgent?.name ?? 'unknown'}\`);
+});
+
+(async () => {
+  await agent.start();
+  console.log('Press Ctrl+C to stop\\n');
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(sig, async () => {
+      await agent.stop();
+      process.exit(0);
+    });
+  }
+})();
+`,
+  },
+  weather: {
+    desc: 'Weather agent — serves weather data (shows real-world patterns)',
+    code: (name, description) => `#!/usr/bin/env npx tsx
+/**
+ * agent://${name} — ${description}
+ * Built with AGENIUM (https://agenium.net)
+ */
+import { createAgent } from 'agenium';
+
+const agent = createAgent('${name}', {
+  listenPort: parseInt(process.env.PORT ?? '9001'),
+  tools: [
+    {
+      name: 'get_weather',
+      description: 'Get current weather for a city',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          city: { type: 'string', description: 'City name' },
+        },
+        required: ['city'],
+      },
+      handler: async (input) => {
+        const city = (input as any).city;
+        // Demo: replace with a real weather API
+        const conditions = ['sunny', 'cloudy', 'rainy', 'snowy'];
+        const condition = conditions[Math.floor(Math.random() * conditions.length)];
+        const temp = Math.round(15 + Math.random() * 20);
+        return {
+          city,
+          temperature: \`\${temp}°C\`,
+          condition,
+          timestamp: new Date().toISOString(),
+        };
+      },
+    },
+    {
+      name: 'ping',
+      description: 'Health check',
+      inputSchema: { type: 'object', properties: {} },
+      handler: async () => ({ pong: true, uptime: Math.round(process.uptime()) }),
+    },
+  ],
+});
+
+agent.on('started', ({ name, port }) => {
+  console.log(\`\\n🌤️  agent://\${name} started on port \${port}\`);
+  console.log('   Tools: get_weather, ping\\n');
+});
+
+(async () => {
+  await agent.start();
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(sig, async () => { await agent.stop(); process.exit(0); });
+  }
+})();
+`,
+  },
+  blank: {
+    desc: 'Blank agent — minimal starter, add your own tools',
+    code: (name, description) => `#!/usr/bin/env npx tsx
+/**
+ * agent://${name} — ${description}
+ * Built with AGENIUM (https://agenium.net)
+ */
+import { createAgent } from 'agenium';
+
+const agent = createAgent('${name}', {
+  listenPort: parseInt(process.env.PORT ?? '9001'),
+  tools: [
+    // Add your tools here:
+    // {
+    //   name: 'my_tool',
+    //   description: 'What it does',
+    //   inputSchema: {
+    //     type: 'object',
+    //     properties: {
+    //       param: { type: 'string', description: 'A parameter' },
+    //     },
+    //     required: ['param'],
+    //   },
+    //   handler: async (input) => {
+    //     return { result: 'hello' };
+    //   },
+    // },
+  ],
+});
+
+agent.on('started', ({ name, port }) => {
+  console.log(\`\\n🤖 agent://\${name} started on port \${port}\`);
+});
+
+(async () => {
+  await agent.start();
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(sig, async () => { await agent.stop(); process.exit(0); });
+  }
+})();
+`,
+  },
+};
+
+async function cmdInit(useDefaults = false): Promise<void> {
+  console.log(`
+╔════════════════════════════════════════════╗
+║      🚀 AGENIUM — Create Your Agent       ║
+╚════════════════════════════════════════════╝
+`);
 
   const configPath = './agenium.json';
-  const dataDir = './.agenium';
-
   if (existsSync(configPath)) {
-    error('agenium.json already exists. Delete it to reinitialize.');
+    error('agenium.json already exists in this directory.');
+    log('  Run in an empty directory or delete agenium.json first.');
     process.exit(1);
   }
 
-  // Create data directory
-  if (!existsSync(dataDir)) {
-    mkdirSync(dataDir, { recursive: true });
+  let agentName: string;
+  let description: string;
+  let template: string;
+
+  if (useDefaults) {
+    // Non-interactive: use sensible defaults
+    const dirName = process.cwd().split('/').pop() || 'my-agent';
+    agentName = dirName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-') || 'my-agent';
+    description = `${agentName} — an AGENIUM agent`;
+    template = 'echo';
+    log(`  Using defaults: name=${agentName}, template=echo\n`);
+  } else {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    try {
+      // Step 1: Agent name
+      log('Step 1/3: Name your agent');
+      log('  This becomes your agent:// address (e.g. agent://mybot.agent)\n');
+      agentName = await ask(rl, 'Agent name', 'my-agent');
+      agentName = agentName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-');
+
+      // Step 2: Description
+      log('\nStep 2/3: Describe your agent\n');
+      description = await ask(rl, 'Description', `${agentName} — an AGENIUM agent`);
+
+      // Step 3: Template
+      const templateKeys = Object.keys(TEMPLATES);
+      const templateChoices = templateKeys.map((k) => TEMPLATES[k].desc);
+      const templateIdx = await askChoice(rl, 'Step 3/3: Choose a template', templateChoices, 0);
+      template = templateKeys[templateIdx];
+    } finally {
+      rl.close();
+    }
   }
 
-  // Generate agent ID
-  const agentId = `agent-${Date.now().toString(36)}`;
+  // Generate files
+  console.log('\n  Creating project...\n');
 
-  // Default config
+  const dataDir = './.agenium';
+  mkdirSync(dataDir, { recursive: true });
+
+  // agenium.json
   const config = {
-    agentId,
+    agentId: agentName,
     version: VERSION,
     dataDir,
     dnsServer: '185.204.169.26',
     metricsPort: 9090,
     metricsHost: '127.0.0.1',
-    bugReportServer: 'http://localhost:3100/api/bug-reports',
     timeouts: {
       dnsLookupMs: 10000,
       handshakeMs: 10000,
       requestMs: 30000,
     },
   };
-
   writeFileSync(configPath, JSON.stringify(config, null, 2));
+  success('agenium.json');
 
-  success(`Created agenium.json`);
-  success(`Created ${dataDir}/`);
-  log(`\nAgent ID: ${agentId}`);
-  log('\nNext steps:');
-  log('  1. Edit agenium.json to configure your agent');
-  log('  2. Run: agenium status');
-  log('  3. Connect: agenium connect agent://target.agent');
+  // agent.ts
+  const agentCode = TEMPLATES[template].code(agentName, description);
+  writeFileSync('./agent.ts', agentCode);
+  success('agent.ts');
+
+  // package.json (only if missing)
+  if (!existsSync('./package.json')) {
+    const pkg = {
+      name: agentName,
+      version: '1.0.0',
+      description,
+      type: 'module',
+      scripts: {
+        start: 'npx tsx agent.ts',
+        dev: 'npx tsx --watch agent.ts',
+      },
+      dependencies: {
+        agenium: `^${VERSION}`,
+      },
+      devDependencies: {
+        tsx: '^4.0.0',
+        typescript: '^5.0.0',
+      },
+    };
+    writeFileSync('./package.json', JSON.stringify(pkg, null, 2));
+    success('package.json');
+  }
+
+  // .gitignore
+  if (!existsSync('./.gitignore')) {
+    writeFileSync('./.gitignore', 'node_modules/\n.agenium/\ndist/\n*.db\n');
+    success('.gitignore');
+  }
+
+  // Data dir
+  success('.agenium/');
+
+  // Next steps
+  console.log(`
+╔════════════════════════════════════════════╗
+║            ✅ Agent Created!               ║
+╚════════════════════════════════════════════╝
+
+  Your agent: agent://${agentName}.agent
+
+  Next steps:
+
+    1. Install dependencies:
+       ${'\x1b[36m'}npm install${'\x1b[0m'}
+
+    2. Start your agent:
+       ${'\x1b[36m'}npm start${'\x1b[0m'}
+
+    3. Test from another terminal:
+       ${'\x1b[36m'}npx agenium resolve agent://${agentName}.agent${'\x1b[0m'}
+
+  📖 Docs: https://docs.agenium.net/quickstart
+  🐙 GitHub: https://github.com/Aganium/agenium
+`);
 }
 
 async function cmdResolve(uri: string): Promise<void> {
@@ -306,7 +591,7 @@ async function main(): Promise<void> {
 
   switch (command) {
     case 'init':
-      await cmdInit();
+      await cmdInit(args.includes('--yes') || args.includes('-y'));
       break;
     case 'resolve':
       await cmdResolve(args[1]);
