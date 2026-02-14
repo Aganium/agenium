@@ -23,6 +23,8 @@ import {
 import { SessionManager, createSessionManager } from './state/session-manager.js';
 import { BugReporter, getBugReporter } from './bug-report/reporter.js';
 import { DNSResolver, ResolvedAgent, DNSErrorCode } from './dns/index.js';
+import { ToolRegistry, ToolHandler, ToolDefinition, ToolContext, ToolErrorCode } from './tools/index.js';
+import type { AgentTool } from './dns/types.js';
 
 import { TransportServer, createServer, IncomingRequest } from './transport/server.js';
 import { TransportClient, createClient } from './transport/client.js';
@@ -71,6 +73,24 @@ export interface AgentConfig extends Partial<AgeniumConfig> {
   capabilities?: Capability[];
   /** Enable persistence (default: true) */
   persistence?: boolean;
+  /** Pre-register tools at construction time */
+  tools?: Array<{
+    name: string;
+    description?: string;
+    inputSchema?: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
+    handler: ToolHandler;
+  }>;
+}
+
+/**
+ * Result of register() / unregister() DNS operations.
+ */
+export interface DNSRegistrationResult {
+  success: boolean;
+  domain?: string;
+  tools?: number;
+  error?: string;
 }
 
 export interface ConnectResult {
@@ -118,6 +138,12 @@ export class Agent extends EventEmitter {
   
   // Deduplication cache (in-memory for fast lookup)
   private dedupeCache: Map<string, number> = new Map();
+  
+  // Tool registry
+  private toolRegistry: ToolRegistry;
+  
+  // DNS API key (set via register())
+  private dnsApiKey: string | null = null;
   
   private isRunning: boolean = false;
 
@@ -223,6 +249,46 @@ export class Agent extends EventEmitter {
         this.outboxManager.ack(msgId);
       }
     });
+    
+    // ---- Tool Registry ----
+    this.toolRegistry = new ToolRegistry();
+    
+    // Pre-register tools from config
+    if (config.tools) {
+      for (const t of config.tools) {
+        this.toolRegistry.register(t.name, {
+          description: t.description,
+          inputSchema: t.inputSchema,
+          outputSchema: t.outputSchema,
+        }, t.handler);
+      }
+    }
+    
+    // Built-in request handler: tool.list
+    this.dispatcher.onRequest('tool.list', async () => {
+      return { tools: this.toolRegistry.definitions() };
+    });
+    
+    // Built-in request handler: tool.invoke
+    this.dispatcher.onRequest('tool.invoke', async (_method, params, sessionId) => {
+      const p = params as Record<string, unknown> | undefined;
+      const toolName = p?.tool as string | undefined;
+      if (!toolName) {
+        throw new Error('Missing required parameter: tool');
+      }
+      const input = (p?.input as Record<string, unknown>) ?? {};
+      
+      const session = this.sessions.get(sessionId);
+      const ctx: ToolContext = {
+        sessionId,
+        caller: session?.remoteAgent
+          ? { name: session.remoteAgent.name, publicKey: session.remoteAgent.publicKey }
+          : undefined,
+        meta: p?.meta as Record<string, unknown> | undefined,
+      };
+      
+      return this.toolRegistry.invoke(toolName, input, ctx);
+    });
   }
 
   // ============================================================================
@@ -254,6 +320,173 @@ export class Agent extends EventEmitter {
 
   setDNSServer(server: string, port: number = 443, useHttps: boolean = true): void {
     this.resolver = new DNSResolver({ server, port, useHttps });
+  }
+
+  // ============================================================================
+  // Tool Management
+  // ============================================================================
+
+  /**
+   * Register a tool with definition + handler in one call.
+   *
+   * @example
+   * agent.tool('greet', {
+   *   description: 'Say hello',
+   *   inputSchema: { type: 'object', properties: { name: { type: 'string' } } },
+   * }, async (input) => {
+   *   return { message: `Hello, ${input.name}!` };
+   * });
+   */
+  tool(name: string, opts: ToolDefinition, handler: ToolHandler): this {
+    this.toolRegistry.register(name, opts, handler);
+    this.emit('tool_registered', { name });
+    return this; // chainable
+  }
+
+  /**
+   * Remove a registered tool. Returns true if it existed.
+   */
+  removeTool(name: string): boolean {
+    const removed = this.toolRegistry.remove(name);
+    if (removed) this.emit('tool_removed', { name });
+    return removed;
+  }
+
+  /**
+   * Get wire-format definitions of all registered tools.
+   */
+  getTools(): AgentTool[] {
+    return this.toolRegistry.definitions();
+  }
+
+  /**
+   * Check if a tool is registered.
+   */
+  hasTool(name: string): boolean {
+    return this.toolRegistry.has(name);
+  }
+
+  // ============================================================================
+  // DNS Registration
+  // ============================================================================
+
+  /**
+   * Register this agent (endpoint + tools + capabilities) with the DNS bridge.
+   *
+   * @param apiKey  Marketplace API key (dom_xxx)
+   * @param host    Public hostname/IP where this agent is reachable
+   */
+  async register(apiKey: string, host?: string): Promise<DNSRegistrationResult> {
+    this.dnsApiKey = apiKey;
+    const endpoint = this.getEndpoint(host);
+    const tools = this.toolRegistry.definitions();
+
+    this.bugReporter.recordAction('dns_register', {
+      endpoint,
+      toolCount: tools.length,
+    });
+
+    try {
+      // DNS bridge is on the marketplace server
+      const bridgeUrl = this.config.dnsServer.replace(/:\d+$/, '') + ':3004';
+      const protocol = 'http';
+      const url = `${protocol}://${bridgeUrl}/agent/endpoint`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey,
+          'User-Agent': `AGENIUM/${this.identity.name}`,
+        },
+        body: JSON.stringify({
+          endpoint,
+          capabilities: ['messaging', 'tools'],
+          tools,
+          metadata: {
+            version: '0.1.0',
+            registeredAt: new Date().toISOString(),
+            toolCount: tools.length,
+          },
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+
+      const data = await response.json() as {
+        success: boolean;
+        data?: { domain: string; tools: AgentTool[] };
+        error?: { code: string; message: string };
+      };
+
+      if (!data.success) {
+        const errMsg = data.error?.message ?? `HTTP ${response.status}`;
+        this.bugReporter.report('connection', 'DNS_REGISTER_FAILED', errMsg);
+        return { success: false, error: errMsg };
+      }
+
+      this.emit('registered', {
+        domain: data.data?.domain,
+        tools: tools.length,
+      });
+
+      return {
+        success: true,
+        domain: data.data?.domain,
+        tools: tools.length,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.bugReporter.report('connection', 'DNS_REGISTER_ERROR', msg);
+      return { success: false, error: msg };
+    }
+  }
+
+  /**
+   * Remove this agent's endpoint from DNS.
+   */
+  async unregister(): Promise<DNSRegistrationResult> {
+    if (!this.dnsApiKey) {
+      return { success: false, error: 'No API key set — call register() first' };
+    }
+
+    try {
+      const bridgeUrl = this.config.dnsServer.replace(/:\d+$/, '') + ':3004';
+      const url = `http://${bridgeUrl}/agent/endpoint`;
+
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'X-API-Key': this.dnsApiKey,
+          'User-Agent': `AGENIUM/${this.identity.name}`,
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+
+      const data = await response.json() as { success: boolean; error?: { message: string } };
+
+      if (!data.success) {
+        return { success: false, error: data.error?.message ?? `HTTP ${response.status}` };
+      }
+
+      this.dnsApiKey = null;
+      this.emit('unregistered');
+      return { success: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: msg };
+    }
+  }
+
+  /**
+   * Push updated tools to DNS without changing endpoint.
+   * Requires a prior register() call.
+   */
+  async syncTools(): Promise<DNSRegistrationResult> {
+    if (!this.dnsApiKey) {
+      return { success: false, error: 'No API key set — call register() first' };
+    }
+    // Re-register with current tools (POST is idempotent)
+    return this.register(this.dnsApiKey);
   }
 
   // ============================================================================
@@ -701,6 +934,10 @@ export class Agent extends EventEmitter {
       persistence: this.db ? this.db.getStats() : null,
       outbox: this.outboxManager?.getStats() ?? null,
       resume: this.resumeManager?.getStats() ?? null,
+      tools: {
+        count: this.toolRegistry.size,
+        names: this.toolRegistry.definitions().map((t) => t.name),
+      },
     };
   }
 

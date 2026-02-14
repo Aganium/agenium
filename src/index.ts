@@ -82,8 +82,19 @@ export {
   createOutboxManager,
 } from './persistence/index.js';
 
+// Tool system
+export {
+  ToolRegistry,
+  ToolErrorCode,
+  type ToolHandler,
+  type ToolDefinition,
+  type ToolContext,
+  type ToolInvokeResult,
+  type RegisteredTool,
+} from './tools/index.js';
+
 // High-level Agent API
-export { Agent, createAgent, type AgentConfig, type ConnectResult } from './agent.js';
+export { Agent, createAgent, type AgentConfig, type ConnectResult, type DNSRegistrationResult } from './agent.js';
 
 // Metrics and observability
 export {
