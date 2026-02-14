@@ -30,6 +30,7 @@
     "dev": "tsx src/index.ts",
     "test": "node --test dist/**/*.test.js",
     "e2e": "npx tsx e2e-test.ts",
+    "test:integration": "npx tsx test/integration-marketplace.ts",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build && npm test"
   },
