@@ -4,6 +4,7 @@ export default {
   extensionsToTreatAsEsm: ['.ts'],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
+    '^agenium$': '/home/ubuntu/agenium/src/index.ts',
   },
   transform: {
     '^.+\\.tsx?$': [
@@ -14,5 +15,8 @@ export default {
       },
     ],
   },
+  transformIgnorePatterns: [
+    'node_modules/(?!agenium)',
+  ],
   testMatch: ['**/tests/**/*.test.ts'],
 };

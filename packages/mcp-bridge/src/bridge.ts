@@ -13,6 +13,7 @@
 
 import { EventEmitter } from 'node:events';
 import { createAgent, Agent } from 'agenium';
+import type { ToolHandler } from 'agenium';
 import { z } from 'zod';
 import { MCPTransportManager } from './mcp-transport.js';
 import {
@@ -99,6 +100,9 @@ export class MCPBridge extends EventEmitter {
       // 3. Create and start AGENIUM agent
       await this.startAgent();
 
+      // 4. Register MCP tools via Cycle 3 Tool API
+      this.registerTools();
+
       this.setState(BridgeState.READY);
       this.emit('ready', {
         tools: this.tools,
@@ -106,7 +110,7 @@ export class MCPBridge extends EventEmitter {
         prompts: this.prompts,
       });
 
-      // 4. Register on DNS (if configured)
+      // 5. Register on DNS (if configured)
       if (this.config.agent?.autoRegister !== false) {
         await this.register();
       }
@@ -184,32 +188,67 @@ export class MCPBridge extends EventEmitter {
     this.log('info', `AGENIUM agent "${this.config.name}" started`);
   }
 
-  /** Register protocol request handlers on the agent */
+  /**
+   * Register MCP tools via agent.tool() (Cycle 3 Tool API).
+   *
+   * Each MCP tool becomes a first-class AGENIUM tool — discoverable via DNS
+   * capability manifest and invocable via agent.callTool() / agent.callToolOnAgent().
+   */
+  private registerTools(): void {
+    if (!this.agent) return;
+
+    for (const mcpTool of this.tools) {
+      const handler: ToolHandler = async (input, ctx) => {
+        const startTime = Date.now();
+        this.stats.toolCalls++;
+        this.emit('tool:call', { tool: mcpTool.name, sessionId: ctx.sessionId });
+
+        try {
+          const result = await this.mcpTransport.callTool(mcpTool.name, input);
+          const durationMs = Date.now() - startTime;
+
+          this.emit('tool:result', { tool: mcpTool.name, sessionId: ctx.sessionId, durationMs });
+          this.log('debug', `Tool ${mcpTool.name} completed in ${durationMs}ms`);
+
+          return {
+            content: result.content,
+            isError: result.isError,
+          };
+        } catch (err) {
+          this.stats.toolErrors++;
+          const errorMsg = (err as Error).message;
+          this.emit('tool:error', { tool: mcpTool.name, sessionId: ctx.sessionId, error: errorMsg });
+          this.log('error', `Tool ${mcpTool.name} failed: ${errorMsg}`);
+          throw err; // Let the tool registry handle the error (TOOL_HANDLER_ERROR)
+        }
+      };
+
+      this.agent.tool(mcpTool.name, {
+        description: mcpTool.description,
+        inputSchema: mcpTool.inputSchema,
+      }, handler);
+
+      this.log('debug', `Registered tool: ${mcpTool.name}`);
+    }
+  }
+
+  /** Register protocol request handlers on the agent (resources, prompts, meta) */
   private registerHandlers(): void {
     if (!this.agent) return;
 
-    // ---- tools/list ----
+    // ---- backward-compat aliases (tools/list → tool.list, tools/call → tool.invoke) ----
     this.agent.onRequest('tools/list', async () => {
-      return {
-        tools: this.tools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          inputSchema: t.inputSchema,
-        })),
-      };
+      return { tools: this.agent!.getTools() };
     });
 
-    // ---- tools/call ----
     this.agent.onRequest('tools/call', async (_frame, data, sessionId) => {
       const params = data as { name: string; arguments?: Record<string, unknown> };
-
       if (!params?.name) {
         return { error: { code: 'INVALID_PARAMS', message: 'Missing tool name' } };
       }
 
       // Verify tool exists
-      const tool = this.tools.find((t) => t.name === params.name);
-      if (!tool) {
+      if (!this.agent!.hasTool(params.name)) {
         return {
           error: {
             code: 'TOOL_NOT_FOUND',
@@ -219,14 +258,12 @@ export class MCPBridge extends EventEmitter {
       }
 
       // Validate input against tool's inputSchema
-      const validationError = this.validateToolArgs(tool, params.arguments);
-      if (validationError) {
-        return {
-          error: {
-            code: 'INVALID_ARGS',
-            message: validationError,
-          },
-        };
+      const tool = this.tools.find((t) => t.name === params.name);
+      if (tool) {
+        const validationError = this.validateToolArgs(tool, params.arguments);
+        if (validationError) {
+          return { error: { code: 'INVALID_ARGS', message: validationError } };
+        }
       }
 
       const startTime = Date.now();
@@ -236,23 +273,13 @@ export class MCPBridge extends EventEmitter {
       try {
         const result = await this.mcpTransport.callTool(params.name, params.arguments);
         const durationMs = Date.now() - startTime;
-
         this.emit('tool:result', { tool: params.name, sessionId, durationMs });
-        this.log('debug', `Tool ${params.name} completed in ${durationMs}ms`);
-
-        return {
-          content: result.content,
-          isError: result.isError,
-        };
+        return { content: result.content, isError: result.isError };
       } catch (err) {
         this.stats.toolErrors++;
         const errorMsg = (err as Error).message;
         this.emit('tool:error', { tool: params.name, sessionId, error: errorMsg });
-        this.log('error', `Tool ${params.name} failed: ${errorMsg}`);
-
-        return {
-          error: { code: 'TOOL_CALL_FAILED', message: errorMsg },
-        };
+        return { error: { code: 'TOOL_CALL_FAILED', message: errorMsg } };
       }
     });
 

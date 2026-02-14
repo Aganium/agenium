@@ -8,6 +8,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
   MCPServerConfig,
   MCPToolInfo,
@@ -33,7 +34,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 export class MCPTransportManager {
   private client: Client;
-  private transport: StdioClientTransport | SSEClientTransport | null = null;
+  private transport: StdioClientTransport | SSEClientTransport | StreamableHTTPClientTransport | null = null;
   private config: MCPServerConfig;
   private connected = false;
   private connectTimeoutMs: number;
@@ -80,9 +81,7 @@ export class MCPTransportManager {
         break;
       }
       case 'streamable-http': {
-        // Streamable HTTP uses the same SSE transport in v1 SDK
-        // In v2 it would use StreamableHTTPClientTransport
-        this.transport = new SSEClientTransport(
+        this.transport = new StreamableHTTPClientTransport(
           new URL(this.config.url),
           {
             requestInit: this.config.headers
