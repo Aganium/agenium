@@ -19,14 +19,33 @@ import {
 // MCP Transport Manager
 // ============================================================================
 
+/** Wrap a promise with a timeout */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  if (ms <= 0) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 export class MCPTransportManager {
   private client: Client;
   private transport: StdioClientTransport | SSEClientTransport | null = null;
   private config: MCPServerConfig;
   private connected = false;
+  private connectTimeoutMs: number;
+  private callTimeoutMs: number;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 3;
+  private reconnectDelayMs = 1000;
 
-  constructor(config: MCPServerConfig) {
+  constructor(config: MCPServerConfig, opts?: { connectTimeoutMs?: number; callTimeoutMs?: number }) {
     this.config = config;
+    this.connectTimeoutMs = opts?.connectTimeoutMs ?? 15_000;
+    this.callTimeoutMs = opts?.callTimeoutMs ?? 30_000;
     this.client = new Client(
       { name: 'agenium-mcp-bridge', version: '0.1.0' },
       { capabilities: {} },
@@ -77,8 +96,50 @@ export class MCPTransportManager {
         throw new Error(`Unsupported MCP transport: ${(this.config as any).transport}`);
     }
 
-    await this.client.connect(this.transport);
+    await withTimeout(
+      this.client.connect(this.transport),
+      this.connectTimeoutMs,
+      'MCP connect',
+    );
     this.connected = true;
+    this.reconnectAttempts = 0;
+  }
+
+  /** Attempt to reconnect after a failure */
+  async reconnect(): Promise<void> {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      throw new Error(`MCP reconnect failed after ${this.maxReconnectAttempts} attempts`);
+    }
+    this.reconnectAttempts++;
+    const delay = this.reconnectDelayMs * Math.pow(2, this.reconnectAttempts - 1);
+
+    await new Promise((r) => setTimeout(r, delay));
+
+    // Reset state
+    this.connected = false;
+    this.transport = null;
+    this.client = new Client(
+      { name: 'agenium-mcp-bridge', version: '0.1.0' },
+      { capabilities: {} },
+    );
+
+    await this.connect();
+  }
+
+  /** Execute a call with auto-reconnect on connection failure */
+  private async withReconnect<T>(fn: () => Promise<T>, label: string): Promise<T> {
+    try {
+      return await withTimeout(fn(), this.callTimeoutMs, label);
+    } catch (err) {
+      const msg = (err as Error).message ?? '';
+      // Reconnect on connection-level failures, not on tool logic errors
+      if (msg.includes('closed') || msg.includes('ECONNREFUSED') || msg.includes('EPIPE') || msg.includes('not connected')) {
+        this.connected = false;
+        await this.reconnect();
+        return await withTimeout(fn(), this.callTimeoutMs, `${label} (retry)`);
+      }
+      throw err;
+    }
   }
 
   /** Disconnect from the MCP server */
@@ -105,7 +166,10 @@ export class MCPTransportManager {
   /** List all tools exposed by the MCP server */
   async listTools(): Promise<MCPToolInfo[]> {
     this.ensureConnected();
-    const result = await this.client.listTools();
+    const result = await this.withReconnect(
+      () => this.client.listTools(),
+      'listTools',
+    );
     return (result.tools ?? []).map((t) => ({
       name: t.name,
       description: t.description,
@@ -122,7 +186,10 @@ export class MCPTransportManager {
     isError?: boolean;
   }> {
     this.ensureConnected();
-    const result = await this.client.callTool({ name, arguments: args });
+    const result = await this.withReconnect(
+      () => this.client.callTool({ name, arguments: args }),
+      `callTool(${name})`,
+    );
     return {
       content: (result.content as any[]) ?? [],
       isError: result.isError as boolean | undefined,
@@ -137,7 +204,10 @@ export class MCPTransportManager {
   async listResources(): Promise<MCPResourceInfo[]> {
     this.ensureConnected();
     try {
-      const result = await this.client.listResources();
+      const result = await this.withReconnect(
+        () => this.client.listResources(),
+        'listResources',
+      );
       return (result.resources ?? []).map((r) => ({
         uri: r.uri,
         name: r.name,
@@ -155,7 +225,10 @@ export class MCPTransportManager {
     contents: Array<{ uri: string; text?: string; blob?: string; mimeType?: string }>;
   }> {
     this.ensureConnected();
-    const result = await this.client.readResource({ uri });
+    const result = await this.withReconnect(
+      () => this.client.readResource({ uri }),
+      `readResource(${uri})`,
+    );
     return {
       contents: (result.contents as any[]) ?? [],
     };
@@ -169,7 +242,10 @@ export class MCPTransportManager {
   async listPrompts(): Promise<MCPPromptInfo[]> {
     this.ensureConnected();
     try {
-      const result = await this.client.listPrompts();
+      const result = await this.withReconnect(
+        () => this.client.listPrompts(),
+        'listPrompts',
+      );
       return (result.prompts ?? []).map((p) => ({
         name: p.name,
         description: p.description,
@@ -194,7 +270,10 @@ export class MCPTransportManager {
     messages: Array<{ role: string; content: { type: string; text?: string } }>;
   }> {
     this.ensureConnected();
-    const result = await this.client.getPrompt({ name, arguments: args });
+    const result = await this.withReconnect(
+      () => this.client.getPrompt({ name, arguments: args }),
+      `getPrompt(${name})`,
+    );
     return {
       description: result.description,
       messages: (result.messages as any[]) ?? [],

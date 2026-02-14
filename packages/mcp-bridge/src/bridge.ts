@@ -13,6 +13,7 @@
 
 import { EventEmitter } from 'node:events';
 import { createAgent, Agent } from 'agenium';
+import { z } from 'zod';
 import { MCPTransportManager } from './mcp-transport.js';
 import {
   MCPBridgeConfig,
@@ -61,10 +62,16 @@ export class MCPBridge extends EventEmitter {
     startedAt: 0,
   };
 
+  // Compiled Zod validators per tool (lazy, built on first call)
+  private toolValidators = new Map<string, z.ZodType>();
+
   constructor(config: MCPBridgeConfig) {
     super();
     this.config = config;
-    this.mcpTransport = new MCPTransportManager(config.mcp);
+    this.mcpTransport = new MCPTransportManager(config.mcp, {
+      connectTimeoutMs: 15_000,
+      callTimeoutMs: config.bridge?.toolCallTimeoutMs ?? DEFAULTS.toolCallTimeoutMs,
+    });
   }
 
   // ============================================================================
@@ -211,6 +218,17 @@ export class MCPBridge extends EventEmitter {
         };
       }
 
+      // Validate input against tool's inputSchema
+      const validationError = this.validateToolArgs(tool, params.arguments);
+      if (validationError) {
+        return {
+          error: {
+            code: 'INVALID_ARGS',
+            message: validationError,
+          },
+        };
+      }
+
       const startTime = Date.now();
       this.stats.toolCalls++;
       this.emit('tool:call', { tool: params.name, sessionId });
@@ -316,6 +334,37 @@ export class MCPBridge extends EventEmitter {
     this.agent.onRequest('ping', async () => {
       return { pong: true, timestamp: Date.now() };
     });
+
+    // ---- health ----
+    this.agent.onRequest('health', async () => {
+      const mcpConnected = this.mcpTransport.isConnected();
+      return {
+        status: mcpConnected ? 'healthy' : 'degraded',
+        bridge: {
+          state: this.state,
+          name: this.config.name,
+          uri: `agent://${this.config.name}`,
+          uptimeMs: this.stats.startedAt > 0 ? Date.now() - this.stats.startedAt : 0,
+        },
+        mcp: {
+          connected: mcpConnected,
+          transport: this.config.mcp.transport,
+          tools: this.tools.length,
+          resources: this.resources.length,
+          prompts: this.prompts.length,
+        },
+        stats: {
+          toolCalls: this.stats.toolCalls,
+          toolErrors: this.stats.toolErrors,
+          resourceReads: this.stats.resourceReads,
+          promptGets: this.stats.promptGets,
+          errorRate: this.stats.toolCalls > 0
+            ? (this.stats.toolErrors / this.stats.toolCalls * 100).toFixed(1) + '%'
+            : '0%',
+        },
+        timestamp: Date.now(),
+      };
+    });
   }
 
   // ============================================================================
@@ -412,6 +461,91 @@ export class MCPBridge extends EventEmitter {
   /** Get the agent:// URI */
   getURI(): string {
     return `agent://${this.config.name}`;
+  }
+
+  // ============================================================================
+  // Input Validation
+  // ============================================================================
+
+  /**
+   * Convert a JSON Schema object to a Zod schema for runtime validation.
+   * Handles the common subset: object with typed properties + required.
+   */
+  private jsonSchemaToZod(schema: Record<string, unknown>): z.ZodType {
+    const type = schema['type'] as string | undefined;
+
+    if (type === 'object') {
+      const properties = (schema['properties'] ?? {}) as Record<string, Record<string, unknown>>;
+      const required = (schema['required'] ?? []) as string[];
+      const shape: Record<string, z.ZodType> = {};
+
+      for (const [key, prop] of Object.entries(properties)) {
+        let fieldSchema = this.jsonSchemaToZod(prop);
+        if (!required.includes(key)) {
+          fieldSchema = fieldSchema.optional();
+        }
+        shape[key] = fieldSchema;
+      }
+
+      // Allow additional properties by default (passthrough)
+      return z.object(shape).passthrough();
+    }
+
+    if (type === 'string') {
+      let s = z.string();
+      if (typeof schema['minLength'] === 'number') s = s.min(schema['minLength'] as number);
+      if (typeof schema['maxLength'] === 'number') s = s.max(schema['maxLength'] as number);
+      if (typeof schema['pattern'] === 'string') s = s.regex(new RegExp(schema['pattern'] as string));
+      if (schema['enum']) return z.enum(schema['enum'] as [string, ...string[]]);
+      return s;
+    }
+
+    if (type === 'number' || type === 'integer') {
+      let n = z.number();
+      if (type === 'integer') n = n.int();
+      if (typeof schema['minimum'] === 'number') n = n.min(schema['minimum'] as number);
+      if (typeof schema['maximum'] === 'number') n = n.max(schema['maximum'] as number);
+      return n;
+    }
+
+    if (type === 'boolean') return z.boolean();
+
+    if (type === 'array') {
+      const items = schema['items'] as Record<string, unknown> | undefined;
+      return z.array(items ? this.jsonSchemaToZod(items) : z.unknown());
+    }
+
+    if (type === 'null') return z.null();
+
+    // Fallback: accept anything
+    return z.unknown();
+  }
+
+  /** Get or create a Zod validator for a tool */
+  private getToolValidator(tool: MCPToolInfo): z.ZodType {
+    let validator = this.toolValidators.get(tool.name);
+    if (!validator) {
+      try {
+        validator = this.jsonSchemaToZod(tool.inputSchema);
+      } catch {
+        validator = z.unknown(); // Fallback if schema is weird
+      }
+      this.toolValidators.set(tool.name, validator);
+    }
+    return validator;
+  }
+
+  /** Validate tool arguments, returns error string or null */
+  private validateToolArgs(tool: MCPToolInfo, args: unknown): string | null {
+    const validator = this.getToolValidator(tool);
+    const result = validator.safeParse(args ?? {});
+    if (!result.success) {
+      const issues = result.error.issues
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join('; ');
+      return `Invalid arguments: ${issues}`;
+    }
+    return null;
   }
 
   // ============================================================================

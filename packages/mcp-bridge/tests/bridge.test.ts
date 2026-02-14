@@ -12,8 +12,8 @@ jest.unstable_mockModule('../src/mcp-transport.js', () => ({
     disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     isConnected: jest.fn().mockReturnValue(true),
     listTools: jest.fn<() => Promise<any[]>>().mockResolvedValue([
-      { name: 'echo', description: 'Echo input back', inputSchema: { type: 'object', properties: { text: { type: 'string' } } } },
-      { name: 'add', description: 'Add two numbers', inputSchema: { type: 'object', properties: { a: { type: 'number' }, b: { type: 'number' } } } },
+      { name: 'echo', description: 'Echo input back', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } },
+      { name: 'add', description: 'Add two numbers', inputSchema: { type: 'object', properties: { a: { type: 'number' }, b: { type: 'number' } }, required: ['a', 'b'] } },
     ]),
     listResources: jest.fn<() => Promise<any[]>>().mockResolvedValue([]),
     listPrompts: jest.fn<() => Promise<any[]>>().mockResolvedValue([]),
@@ -79,6 +79,139 @@ describe('MCPBridge', () => {
       expect(stats.tools).toBe(0);
       expect(stats.toolCalls).toBe(0);
       expect(stats.toolErrors).toBe(0);
+    });
+  });
+
+  describe('input validation', () => {
+    it('validates tool args via validateToolArgs (private, tested through reflection)', () => {
+      const bridge = new MCPBridge({
+        name: 'validation-test',
+        mcp: { transport: 'stdio', command: 'true' },
+      });
+
+      // Access private method via prototype for testing
+      const tool = {
+        name: 'add',
+        description: 'Add two numbers',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            a: { type: 'number' },
+            b: { type: 'number' },
+          },
+          required: ['a', 'b'],
+        },
+      };
+
+      // Valid args - should return null
+      const validResult = (bridge as any).validateToolArgs(tool, { a: 1, b: 2 });
+      expect(validResult).toBeNull();
+
+      // Invalid args - missing required 'b'
+      const invalidResult = (bridge as any).validateToolArgs(tool, { a: 1 });
+      expect(invalidResult).not.toBeNull();
+      expect(invalidResult).toContain('Invalid arguments');
+
+      // Wrong type
+      const wrongType = (bridge as any).validateToolArgs(tool, { a: 'not-a-number', b: 2 });
+      expect(wrongType).not.toBeNull();
+      expect(wrongType).toContain('Invalid arguments');
+    });
+
+    it('accepts valid string args', () => {
+      const bridge = new MCPBridge({
+        name: 'string-validation',
+        mcp: { transport: 'stdio', command: 'true' },
+      });
+
+      const tool = {
+        name: 'echo',
+        inputSchema: {
+          type: 'object',
+          properties: { text: { type: 'string' } },
+          required: ['text'],
+        },
+      };
+
+      expect((bridge as any).validateToolArgs(tool, { text: 'hello' })).toBeNull();
+      expect((bridge as any).validateToolArgs(tool, {})).not.toBeNull();
+    });
+
+    it('handles enum validation', () => {
+      const bridge = new MCPBridge({
+        name: 'enum-validation',
+        mcp: { transport: 'stdio', command: 'true' },
+      });
+
+      const tool = {
+        name: 'lang',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            language: { type: 'string', enum: ['en', 'fa', 'de'] },
+          },
+          required: ['language'],
+        },
+      };
+
+      expect((bridge as any).validateToolArgs(tool, { language: 'en' })).toBeNull();
+      expect((bridge as any).validateToolArgs(tool, { language: 'xx' })).not.toBeNull();
+    });
+
+    it('allows additional properties by default', () => {
+      const bridge = new MCPBridge({
+        name: 'extra-props',
+        mcp: { transport: 'stdio', command: 'true' },
+      });
+
+      const tool = {
+        name: 'flexible',
+        inputSchema: {
+          type: 'object',
+          properties: { name: { type: 'string' } },
+          required: ['name'],
+        },
+      };
+
+      // Extra properties should be allowed
+      expect((bridge as any).validateToolArgs(tool, { name: 'test', extra: true })).toBeNull();
+    });
+
+    it('validates nested arrays', () => {
+      const bridge = new MCPBridge({
+        name: 'array-validation',
+        mcp: { transport: 'stdio', command: 'true' },
+      });
+
+      const tool = {
+        name: 'batch',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            items: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['items'],
+        },
+      };
+
+      expect((bridge as any).validateToolArgs(tool, { items: ['a', 'b'] })).toBeNull();
+      expect((bridge as any).validateToolArgs(tool, { items: [1, 2] })).not.toBeNull();
+    });
+
+    it('handles empty/missing schema gracefully', () => {
+      const bridge = new MCPBridge({
+        name: 'no-schema',
+        mcp: { transport: 'stdio', command: 'true' },
+      });
+
+      // Tool with no real schema — should accept anything
+      const tool = {
+        name: 'any',
+        inputSchema: {},
+      };
+
+      expect((bridge as any).validateToolArgs(tool, { foo: 'bar' })).toBeNull();
+      expect((bridge as any).validateToolArgs(tool, undefined)).toBeNull();
     });
   });
 });
