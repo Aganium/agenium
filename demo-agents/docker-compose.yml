@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  echo:
+    build:
+      context: ..
+      dockerfile: demo-agents/Dockerfile
+    container_name: agenium-echo
+    environment:
+      - AGENT=echo
+      - PORT=9001
+      - PUBLIC_HOST=${PUBLIC_HOST:-localhost}
+      - DNS_API_KEY=${DNS_API_KEY:-}
+      - DNS_SERVER=185.204.169.26:3000
+    ports:
+      - "9001:9001"
+    restart: unless-stopped
+    mem_limit: 128m
+
+  weather:
+    build:
+      context: ..
+      dockerfile: demo-agents/Dockerfile
+    container_name: agenium-weather
+    environment:
+      - AGENT=weather
+      - PORT=9002
+      - PUBLIC_HOST=${PUBLIC_HOST:-localhost}
+      - DNS_API_KEY=${DNS_API_KEY:-}
+      - DNS_SERVER=185.204.169.26:3000
+    ports:
+      - "9002:9002"
+    restart: unless-stopped
+    mem_limit: 128m
+
+  translator:
+    build:
+      context: ..
+      dockerfile: demo-agents/Dockerfile
+    container_name: agenium-translator
+    environment:
+      - AGENT=translator
+      - PORT=9003
+      - PUBLIC_HOST=${PUBLIC_HOST:-localhost}
+      - DNS_API_KEY=${DNS_API_KEY:-}
+      - DNS_SERVER=185.204.169.26:3000
+    ports:
+      - "9003:9003"
+    restart: unless-stopped
+    mem_limit: 128m
+
+  helper:
+    build:
+      context: ..
+      dockerfile: demo-agents/Dockerfile
+    container_name: agenium-helper
+    environment:
+      - AGENT=helper
+      - PORT=9004
+      - PUBLIC_HOST=${PUBLIC_HOST:-localhost}
+      - DNS_API_KEY=${DNS_API_KEY:-}
+      - DNS_SERVER=185.204.169.26:3000
+    ports:
+      - "9004:9004"
+    restart: unless-stopped
+    mem_limit: 128m
