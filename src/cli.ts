@@ -44,7 +44,7 @@ function printHelp(): void {
 Usage: agenium <command> [options]
 
 Commands:
-  init                    Initialize a new agent in current directory
+  init [--yes]            Initialize a new agent in current directory
   resolve <agent://uri>   Resolve agent URI to IP:port via DNS
   connect <agent://uri>   Connect to a remote agent
   status                  Show local agent status
@@ -53,6 +53,7 @@ Commands:
 
 Options:
   --help, -h              Show this help
+  --yes, -y               Skip interactive prompts (use defaults)
   --config, -c <file>     Config file (default: ./agenium.json)
 
 Examples:
