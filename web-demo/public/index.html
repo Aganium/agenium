@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AGENIUM — Live Agent Demo</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔗</text></svg>">
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --surface: #12121a;
+      --surface-2: #1a1a26;
+      --border: #2a2a3a;
+      --text: #e4e4ef;
+      --text-dim: #8888a0;
+      --accent: #6c5ce7;
+      --accent-glow: rgba(108, 92, 231, 0.3);
+      --success: #00d2a0;
+      --error: #ff6b6b;
+      --mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+      --sans: 'Inter', -apple-system, system-ui, sans-serif;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: var(--surface);
+    }
+
+    .logo {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .logo span { color: var(--accent); }
+
+    .badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: var(--accent-glow);
+      color: var(--accent);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .header-right {
+      margin-left: auto;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .header-right a {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 13px;
+      transition: color 0.2s;
+    }
+
+    .header-right a:hover { color: var(--text); }
+
+    /* Main layout */
+    main {
+      flex: 1;
+      display: flex;
+      max-height: calc(100vh - 57px);
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 280px;
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .sidebar h3 {
+      padding: 16px 16px 8px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-dim);
+    }
+
+    .agent-card {
+      padding: 12px 16px;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+      transition: all 0.15s;
+    }
+
+    .agent-card:hover {
+      background: var(--surface-2);
+    }
+
+    .agent-card.active {
+      background: var(--surface-2);
+      border-left-color: var(--accent);
+    }
+
+    .agent-card .name {
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+
+    .agent-card .uri {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+
+    .agent-card .desc {
+      font-size: 12px;
+      color: var(--text-dim);
+      line-height: 1.4;
+    }
+
+    .agent-card .status {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--success);
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+
+    /* Chat area */
+    .chat-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chat-header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .chat-header .agent-name {
+      font-family: var(--mono);
+      font-weight: 600;
+    }
+
+    .chat-header .tools-count {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .connection-status {
+      margin-left: auto;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .connection-status.connected { color: var(--success); }
+    .connection-status.connecting { color: #f0c040; }
+    .connection-status.disconnected { color: var(--text-dim); }
+
+    /* Messages */
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .message {
+      max-width: 80%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+      animation: fadeIn 0.2s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message.system {
+      align-self: center;
+      max-width: 100%;
+      background: none;
+      color: var(--text-dim);
+      font-size: 12px;
+      text-align: center;
+      padding: 8px;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: var(--accent);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.agent {
+      align-self: flex-start;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
+    }
+
+    .message .label {
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      opacity: 0.7;
+    }
+
+    .message pre {
+      font-family: var(--mono);
+      font-size: 12px;
+      background: rgba(0,0,0,0.3);
+      padding: 8px 10px;
+      border-radius: 6px;
+      margin-top: 6px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .message .latency {
+      font-size: 10px;
+      opacity: 0.5;
+      margin-top: 4px;
+      text-align: right;
+    }
+
+    /* Tools panel */
+    .tools-panel {
+      padding: 12px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tool-btn {
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 6px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-2);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .tool-btn:hover {
+      border-color: var(--accent);
+      background: var(--accent-glow);
+    }
+
+    .tool-btn.active {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: white;
+    }
+
+    /* Input area */
+    .input-area {
+      padding: 12px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      gap: 8px;
+    }
+
+    .input-area input {
+      flex: 1;
+      font-family: var(--mono);
+      font-size: 14px;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .input-area input:focus {
+      border-color: var(--accent);
+    }
+
+    .input-area input::placeholder {
+      color: var(--text-dim);
+    }
+
+    .send-btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .send-btn:hover { filter: brightness(1.15); }
+    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Welcome screen */
+    .welcome {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-dim);
+      gap: 16px;
+      padding: 40px;
+      text-align: center;
+    }
+
+    .welcome h2 {
+      font-size: 28px;
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .welcome p {
+      max-width: 500px;
+      line-height: 1.6;
+    }
+
+    .welcome code {
+      font-family: var(--mono);
+      background: var(--surface-2);
+      padding: 2px 8px;
+      border-radius: 4px;
+      color: var(--accent);
+      font-size: 14px;
+    }
+
+    .protocol-flow {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 16px;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+
+    .protocol-flow .step {
+      padding: 8px 14px;
+      border-radius: 8px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+    }
+
+    .protocol-flow .arrow { color: var(--accent); font-weight: bold; }
+
+    /* Loading dots */
+    .loading-dots::after {
+      content: '';
+      animation: dots 1.5s steps(4, end) infinite;
+    }
+
+    @keyframes dots {
+      0%, 20% { content: ''; }
+      40% { content: '.'; }
+      60% { content: '..'; }
+      80%, 100% { content: '...'; }
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .protocol-flow { flex-wrap: wrap; justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">AGENIUM <span>Demo</span></div>
+    <div class="badge">Live</div>
+    <div class="header-right">
+      <a href="https://docs.agenium.net" target="_blank">Docs</a>
+      <a href="https://github.com/Aganium/agenium" target="_blank">GitHub</a>
+      <a href="https://www.npmjs.com/package/agenium" target="_blank">npm</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="sidebar">
+      <h3>Demo Agents</h3>
+      <div id="agent-list"></div>
+    </div>
+
+    <div class="chat-area" id="chat-area">
+      <div class="welcome" id="welcome">
+        <h2>🔗 Try the agent:// protocol</h2>
+        <p>
+          Connect to live AGENIUM agents and invoke their tools in real-time.
+          Everything runs over the <code>agent://</code> protocol — DNS resolution,
+          handshake, and JSON-RPC messaging.
+        </p>
+        <div class="protocol-flow">
+          <div class="step">DNS Resolve</div>
+          <div class="arrow">→</div>
+          <div class="step">TLS Handshake</div>
+          <div class="arrow">→</div>
+          <div class="step">tool.list</div>
+          <div class="arrow">→</div>
+          <div class="step">tool.invoke</div>
+        </div>
+        <p style="margin-top: 24px; font-size: 13px;">
+          ← Pick an agent from the sidebar to start
+        </p>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const API = window.location.origin + '/api';
+    let currentAgent = null;
+    let sessionId = null;
+    let tools = [];
+
+    // Fetch and render agent list
+    async function loadAgents() {
+      const res = await fetch(`${API}/agents`);
+      const data = await res.json();
+      const list = document.getElementById('agent-list');
+      list.innerHTML = data.agents.map(a => `
+        <div class="agent-card" data-name="${a.name}" onclick="selectAgent('${a.name}')">
+          <div class="name"><span class="status"></span>${a.name}</div>
+          <div class="uri">${a.uri}</div>
+          <div class="desc">${a.description}</div>
+        </div>
+      `).join('');
+    }
+
+    async function selectAgent(name) {
+      // Update sidebar
+      document.querySelectorAll('.agent-card').forEach(c => c.classList.remove('active'));
+      document.querySelector(`.agent-card[data-name="${name}"]`)?.classList.add('active');
+
+      currentAgent = name;
+      sessionId = null;
+      tools = [];
+
+      // Replace welcome with chat UI
+      const chatArea = document.getElementById('chat-area');
+      chatArea.innerHTML = `
+        <div class="chat-header">
+          <div class="agent-name">agent://${name}.agent</div>
+          <div class="tools-count" id="tools-count"></div>
+          <div class="connection-status connecting" id="conn-status">
+            ● Connecting<span class="loading-dots"></span>
+          </div>
+        </div>
+        <div class="messages" id="messages">
+          <div class="message system">Resolving agent://${name}.agent via DNS...</div>
+        </div>
+        <div class="tools-panel" id="tools-panel" style="display:none"></div>
+        <div class="input-area" id="input-area" style="display:none">
+          <input type="text" id="tool-input" placeholder="Enter input..." onkeydown="if(event.key==='Enter')sendTool()">
+          <button class="send-btn" onclick="sendTool()">Invoke</button>
+        </div>
+      `;
+
+      // Connect
+      try {
+        const start = Date.now();
+        const res = await fetch(`${API}/agents/${name}/connect`, { method: 'POST' });
+        const elapsed = Date.now() - start;
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Connection failed');
+        }
+
+        const data = await res.json();
+        sessionId = data.sessionId;
+        tools = Array.isArray(data.tools) ? data.tools : [];
+
+        // Update status
+        document.getElementById('conn-status').className = 'connection-status connected';
+        document.getElementById('conn-status').innerHTML = '● Connected';
+        document.getElementById('tools-count').textContent = `${tools.length} tools`;
+
+        // Show connection log
+        addMessage('system', `✅ Connected in ${elapsed}ms — Handshake complete`);
+        addMessage('system', `Tools available: ${tools.map(t => t.name).join(', ')}`);
+
+        // Render tool buttons
+        renderTools(tools);
+      } catch (err) {
+        document.getElementById('conn-status').className = 'connection-status disconnected';
+        document.getElementById('conn-status').innerHTML = '● Failed';
+        addMessage('system', `❌ ${err.message}`);
+      }
+    }
+
+    function renderTools(tools) {
+      const panel = document.getElementById('tools-panel');
+      panel.style.display = 'flex';
+      panel.innerHTML = tools.map(t => `
+        <button class="tool-btn" data-tool="${t.name}"
+          onclick="selectTool('${t.name}')"
+          title="${t.description || ''}">
+          ${t.name}
+        </button>
+      `).join('');
+
+      document.getElementById('input-area').style.display = 'flex';
+
+      // Auto-select first tool
+      if (tools.length > 0) selectTool(tools[0].name);
+    }
+
+    let selectedTool = null;
+
+    function selectTool(name) {
+      selectedTool = name;
+      document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector(`.tool-btn[data-tool="${name}"]`)?.classList.add('active');
+
+      const tool = tools.find(t => t.name === name);
+      const input = document.getElementById('tool-input');
+
+      // Generate placeholder based on input schema
+      if (tool?.inputSchema?.properties) {
+        const props = Object.keys(tool.inputSchema.properties);
+        if (props.length === 0) {
+          input.placeholder = 'No input needed — just click Invoke';
+        } else if (props.length === 1) {
+          input.placeholder = `${props[0]}: type a value...`;
+        } else {
+          input.placeholder = `JSON: { ${props.map(p => `"${p}": "..."`).join(', ')} }`;
+        }
+      } else {
+        input.placeholder = 'Enter input (JSON or simple value)...';
+      }
+      input.focus();
+    }
+
+    async function sendTool() {
+      if (!currentAgent || !selectedTool) return;
+
+      const input = document.getElementById('tool-input');
+      const rawValue = input.value.trim();
+      input.value = '';
+
+      // Build input object
+      let toolInput = {};
+      const tool = tools.find(t => t.name === selectedTool);
+
+      if (rawValue) {
+        // Try JSON first
+        try {
+          toolInput = JSON.parse(rawValue);
+        } catch {
+          // If single property, auto-wrap
+          if (tool?.inputSchema?.properties) {
+            const props = Object.keys(tool.inputSchema.properties);
+            if (props.length === 1) {
+              toolInput = { [props[0]]: rawValue };
+            } else {
+              toolInput = { value: rawValue };
+            }
+          } else {
+            toolInput = { input: rawValue };
+          }
+        }
+      }
+
+      addMessage('user', `${selectedTool}(${JSON.stringify(toolInput)})`);
+
+      try {
+        const start = Date.now();
+        const res = await fetch(`${API}/agents/${currentAgent}/invoke`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            tool: selectedTool,
+            input: toolInput,
+          }),
+        });
+        const elapsed = Date.now() - start;
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Invocation failed');
+        }
+
+        const data = await res.json();
+        addMessage('agent', JSON.stringify(data.result, null, 2), elapsed);
+      } catch (err) {
+        addMessage('system', `❌ ${err.message}`);
+      }
+    }
+
+    function addMessage(type, content, latencyMs) {
+      const messages = document.getElementById('messages');
+      if (!messages) return;
+
+      const div = document.createElement('div');
+      div.className = `message ${type}`;
+
+      if (type === 'agent') {
+        div.innerHTML = `
+          <div class="label">agent://${currentAgent}.agent</div>
+          <pre>${escapeHtml(content)}</pre>
+          ${latencyMs ? `<div class="latency">${latencyMs}ms</div>` : ''}
+        `;
+      } else if (type === 'user') {
+        div.innerHTML = `<div class="label">You</div>${escapeHtml(content)}`;
+      } else {
+        div.textContent = content;
+      }
+
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // Init
+    loadAgents();
+  </script>
+</body>
+</html>
