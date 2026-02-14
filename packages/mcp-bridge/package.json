@@ -1,0 +1,52 @@
+{
+  "name": "@agenium/mcp-server",
+  "version": "0.1.0",
+  "description": "Bridge MCP (Model Context Protocol) servers to the AGENIUM agent:// network",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "agenium-mcp": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --forceExit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "agenium",
+    "mcp",
+    "model-context-protocol",
+    "agent",
+    "bridge",
+    "ai",
+    "tools"
+  ],
+  "author": "AGENIUM",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/agenium-org/agenium"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "agenium": "^0.1.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "jest": "^29.7.0",
+    "@jest/globals": "^29.7.0",
+    "ts-jest": "^29.2.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
