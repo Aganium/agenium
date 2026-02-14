@@ -96,6 +96,42 @@ export enum DNSErrorCode {
 }
 
 // ============================================================================
+// Capability Manifest
+// ============================================================================
+
+/**
+ * A tool/function that an agent exposes.
+ * Follows MCP/OpenAI-style schema for interoperability.
+ */
+export interface AgentTool {
+  /** Tool identifier (unique within this agent) */
+  name: string;
+  /** Human-readable description */
+  description?: string;
+  /** JSON Schema describing accepted input */
+  inputSchema?: Record<string, unknown>;
+  /** JSON Schema describing output format */
+  outputSchema?: Record<string, unknown>;
+}
+
+/**
+ * Full capability manifest returned in resolve response.
+ * Tells callers exactly what an agent can do.
+ */
+export interface CapabilityManifest {
+  /** Structured tool definitions */
+  tools: AgentTool[];
+  /** Free-form capability tags (backward compat) */
+  capabilities: string[];
+  /** Supported protocol versions */
+  protocolVersions: string[];
+  /** Agent description */
+  description?: string;
+  /** Extra metadata (contact, docs URL, etc.) */
+  metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
 // Resolved Agent Info
 // ============================================================================
 
@@ -112,10 +148,14 @@ export interface ResolvedAgent {
   port: number;
   /** Description */
   description?: string;
-  /** Supported capabilities */
+  /** Supported capabilities (tags) */
   capabilities: string[];
+  /** Structured tool definitions */
+  tools: AgentTool[];
   /** Supported protocol versions */
   protocolVersions: string[];
+  /** Extra metadata from the agent */
+  metadata?: Record<string, unknown>;
   /** When this was resolved */
   resolvedAt: number;
   /** When this cache entry expires */

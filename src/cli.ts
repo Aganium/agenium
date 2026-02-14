@@ -137,11 +137,31 @@ async function cmdResolve(uri: string): Promise<void> {
       success(`Resolved: ${agent.name}`);
       log(`  Endpoint: ${agent.endpoint}`);
       log(`  Host:     ${agent.host}:${agent.port}`);
+      if (agent.description) {
+        log(`  Desc:     ${agent.description}`);
+      }
       if (agent.publicKey) {
         log(`  PubKey:   ${agent.publicKey.slice(0, 24)}...`);
       }
       if (agent.capabilities.length > 0) {
         log(`  Caps:     ${agent.capabilities.join(', ')}`);
+      }
+      if (agent.tools && agent.tools.length > 0) {
+        log(`  Tools:    ${agent.tools.length} registered`);
+        for (const tool of agent.tools) {
+          const desc = tool.description ? ` — ${tool.description}` : '';
+          log(`    • ${tool.name}${desc}`);
+          if (tool.inputSchema) {
+            const props = (tool.inputSchema as Record<string, unknown>).properties;
+            if (props && typeof props === 'object') {
+              const keys = Object.keys(props);
+              log(`      Input:  { ${keys.join(', ')} }`);
+            }
+          }
+        }
+      }
+      if (agent.metadata && Object.keys(agent.metadata).length > 0) {
+        log(`  Meta:     ${JSON.stringify(agent.metadata)}`);
       }
     } else {
       error(`Could not resolve: ${fullUri}`);

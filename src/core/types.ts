@@ -65,6 +65,14 @@ export function toAgentURI(name: string): string {
 // ============================================================================
 
 /**
+ * A tool/function that an agent exposes (re-exported from dns/types for convenience)
+ */
+export interface AgentToolRef {
+  name: string;
+  description?: string;
+}
+
+/**
  * Resolved endpoint for connecting to an agent
  */
 export interface AgentEndpoint {
@@ -78,6 +86,8 @@ export interface AgentEndpoint {
   protocolVersions: string[];
   /** Capabilities this agent supports */
   capabilities: string[];
+  /** Tools this agent exposes */
+  tools: AgentToolRef[];
   /** TTL in seconds for caching */
   ttl: number;
   /** When this endpoint was resolved */

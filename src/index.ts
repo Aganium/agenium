@@ -15,6 +15,8 @@ export {
   // Types
   DNSErrorCode,
   ResolvedAgent,
+  AgentTool,
+  CapabilityManifest,
   validateAgentName,
   // Resolver
   DNSResolver,

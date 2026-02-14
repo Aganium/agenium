@@ -8,6 +8,7 @@ import {
   ResolveResult,
   DNSLookupResponse,
   DNSErrorCode,
+  AgentTool,
   validateAgentName,
   parseAgentURI,
 } from './types.js';
@@ -170,7 +171,7 @@ export class DNSResolver {
 
       // Parse response
       // DNS server returns: { success: true, data: { domain, endpoint, status, ... } }
-      const responseData = await response.json() as { success: boolean; data?: { domain: string; endpoint: string; status: string; health?: string; publicKey?: string; capabilities?: string[]; protocolVersions?: string[]; }; error?: { code: DNSErrorCode; message: string } };
+      const responseData = await response.json() as { success: boolean; data?: { domain: string; endpoint: string; status: string; health?: string; publicKey?: string; capabilities?: string[]; tools?: AgentTool[]; protocolVersions?: string[]; description?: string; metadata?: Record<string, unknown>; }; error?: { code: DNSErrorCode; message: string } };
 
       if (!responseData.success || !responseData.data) {
         return {
@@ -201,6 +202,12 @@ export class DNSResolver {
         };
       }
 
+      // Normalize tools: filter out invalid entries, ensure name exists
+      const rawTools = agentData.tools ?? [];
+      const tools: AgentTool[] = rawTools.filter(
+        (t): t is AgentTool => !!t && typeof t.name === 'string' && t.name.length > 0,
+      );
+
       // Build resolved agent
       const ttlSeconds = this.config.defaultTtlSeconds;
       const resolvedAgent: ResolvedAgent = {
@@ -209,9 +216,11 @@ export class DNSResolver {
         endpoint: agentData.endpoint,
         host,
         port,
-        description: undefined,
+        description: agentData.description,
         capabilities: agentData.capabilities ?? [],
+        tools,
         protocolVersions: agentData.protocolVersions ?? ['1.0'],
+        metadata: agentData.metadata,
         resolvedAt: now(),
         expiresAt: now() + (ttlSeconds * 1000),
       };
