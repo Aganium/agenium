@@ -11,6 +11,8 @@ export type {
   ToolContext,
   ToolInvokeResult,
   RegisteredTool,
+  RemoteToolListResult,
+  RemoteToolInvokeResult,
 } from './types.js';
 
 export { ToolErrorCode } from './types.js';

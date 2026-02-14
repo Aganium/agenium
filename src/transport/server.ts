@@ -45,6 +45,7 @@ export class TransportServer extends EventEmitter {
   private server: http2.Http2SecureServer | null = null;
   private handler: RequestHandler | null = null;
   private activeStreams: Set<http2.ServerHttp2Stream> = new Set();
+  private activeSessions: Set<http2.ServerHttp2Session> = new Set();
 
   constructor(config: ServerConfig) {
     super();
@@ -80,6 +81,9 @@ export class TransportServer extends EventEmitter {
         });
 
         this.server.on('session', (session) => {
+          this.activeSessions.add(session);
+          session.on('close', () => this.activeSessions.delete(session));
+
           const socket = session.socket as tls.TLSSocket;
           const peerCert = socket.getPeerCertificate();
           
@@ -121,6 +125,14 @@ export class TransportServer extends EventEmitter {
         }
       }
       this.activeStreams.clear();
+
+      // Destroy all HTTP/2 sessions (prevents server.close from hanging)
+      for (const session of this.activeSessions) {
+        if (!session.destroyed) {
+          session.destroy();
+        }
+      }
+      this.activeSessions.clear();
 
       if (this.server) {
         this.server.close(() => {

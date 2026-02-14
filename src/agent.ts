@@ -23,7 +23,14 @@ import {
 import { SessionManager, createSessionManager } from './state/session-manager.js';
 import { BugReporter, getBugReporter } from './bug-report/reporter.js';
 import { DNSResolver, ResolvedAgent, DNSErrorCode } from './dns/index.js';
-import { ToolRegistry, ToolHandler, ToolDefinition, ToolContext, ToolErrorCode } from './tools/index.js';
+import {
+  ToolRegistry,
+  ToolHandler,
+  ToolDefinition,
+  ToolContext,
+  ToolErrorCode,
+} from './tools/index.js';
+import type { RemoteToolListResult, RemoteToolInvokeResult } from './tools/types.js';
 import type { AgentTool } from './dns/types.js';
 
 import { TransportServer, createServer, IncomingRequest } from './transport/server.js';
@@ -367,6 +374,149 @@ export class Agent extends EventEmitter {
   }
 
   // ============================================================================
+  // Remote Tool Invocation
+  // ============================================================================
+
+  /**
+   * List tools exposed by a remote agent over an active session.
+   *
+   * Sends a `tool.list` request and returns typed results.
+   *
+   * @param sessionId  Active session to the remote agent
+   * @param timeoutMs  Optional timeout (default: config.requestTimeoutMs)
+   */
+  async listRemoteTools(
+    sessionId: string,
+    timeoutMs?: number,
+  ): Promise<RemoteToolListResult> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw Object.assign(
+        new Error(`${ToolErrorCode.SESSION_NOT_ACTIVE}: Session not found: ${sessionId}`),
+        { code: ToolErrorCode.SESSION_NOT_ACTIVE },
+      );
+    }
+    if (session.state !== SessionState.ACTIVE) {
+      throw Object.assign(
+        new Error(`${ToolErrorCode.SESSION_NOT_ACTIVE}: Session not active: ${session.state}`),
+        { code: ToolErrorCode.SESSION_NOT_ACTIVE },
+      );
+    }
+
+    const result = await this.dispatcher.request(sessionId, 'tool.list', undefined, timeoutMs) as {
+      tools?: AgentTool[];
+    };
+
+    return {
+      tools: result?.tools ?? [],
+      sessionId,
+    };
+  }
+
+  /**
+   * Invoke a tool on a remote agent over an active session.
+   *
+   * @param sessionId  Active session to the remote agent
+   * @param toolName   Name of the tool to invoke
+   * @param input      Input parameters for the tool
+   * @param meta       Optional metadata forwarded to the remote handler
+   * @param timeoutMs  Optional timeout (default: config.requestTimeoutMs)
+   */
+  async callTool(
+    sessionId: string,
+    toolName: string,
+    input: Record<string, unknown> = {},
+    meta?: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<RemoteToolInvokeResult> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw Object.assign(
+        new Error(`${ToolErrorCode.SESSION_NOT_ACTIVE}: Session not found: ${sessionId}`),
+        { code: ToolErrorCode.SESSION_NOT_ACTIVE },
+      );
+    }
+    if (session.state !== SessionState.ACTIVE) {
+      throw Object.assign(
+        new Error(`${ToolErrorCode.SESSION_NOT_ACTIVE}: Session not active: ${session.state}`),
+        { code: ToolErrorCode.SESSION_NOT_ACTIVE },
+      );
+    }
+
+    this.bugReporter.recordAction('remote_tool_invoke', {
+      sessionId,
+      tool: toolName,
+      inputKeys: Object.keys(input),
+    });
+
+    try {
+      const result = await this.dispatcher.request(
+        sessionId,
+        'tool.invoke',
+        { tool: toolName, input, ...(meta ? { meta } : {}) },
+        timeoutMs,
+      ) as { tool: string; output: unknown } | undefined;
+
+      return {
+        tool: result?.tool ?? toolName,
+        output: result?.output ?? null,
+        sessionId,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const code = (err as any)?.code;
+
+      // Timeouts / connection issues
+      if (msg.includes('timed out') || msg.includes('TIMEOUT') || msg.includes('ECONNREFUSED')) {
+        throw Object.assign(
+          new Error(`${ToolErrorCode.REMOTE_UNREACHABLE}: ${msg}`),
+          { code: ToolErrorCode.REMOTE_UNREACHABLE, cause: err },
+        );
+      }
+
+      // Any error from remote tool invocation (HANDLER_ERROR, TOOL_NOT_FOUND, etc.)
+      throw Object.assign(
+        new Error(`${ToolErrorCode.REMOTE_ERROR}: Remote tool error: ${msg}`),
+        { code: ToolErrorCode.REMOTE_ERROR, cause: err },
+      );
+    }
+  }
+
+  /**
+   * One-shot convenience: resolve an agent, connect, invoke a tool.
+   *
+   * If a session to the target already exists and is active, it is reused.
+   *
+   * @param target    agent:// URI or {host, port}
+   * @param toolName  Tool name to invoke
+   * @param input     Input parameters
+   * @param meta      Optional metadata
+   * @param timeoutMs Timeout per network call
+   */
+  async callToolOnAgent(
+    target: string | { host: string; port: number },
+    toolName: string,
+    input: Record<string, unknown> = {},
+    meta?: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<RemoteToolInvokeResult> {
+    this.bugReporter.recordAction('call_tool_on_agent', { target, tool: toolName });
+
+    // Connect (or reuse existing session)
+    const connectResult = await this.connect(target);
+    if (!connectResult.success || !connectResult.session) {
+      throw Object.assign(
+        new Error(
+          `${ToolErrorCode.REMOTE_UNREACHABLE}: Cannot reach agent: ${connectResult.error ?? 'unknown'}`,
+        ),
+        { code: ToolErrorCode.REMOTE_UNREACHABLE },
+      );
+    }
+
+    return this.callTool(connectResult.session.id, toolName, input, meta, timeoutMs);
+  }
+
+  // ============================================================================
   // DNS Registration
   // ============================================================================
 
@@ -599,8 +749,20 @@ export class Agent extends EventEmitter {
       endpoint = `https://${host}:${port}`;
     }
     
-    // Check for existing active session
+    // Check for existing active session by agent name OR by connection endpoint
     let session = this.sessions.findByRemote(remoteAgentName);
+    if (!session) {
+      // Also search by endpoint in case remoteAgent.name was updated after handshake
+      for (const [sid, conn] of this.sessionConnections) {
+        if (conn.host === host && conn.port === port) {
+          const s = this.sessions.get(sid);
+          if (s && s.state === SessionState.ACTIVE) {
+            session = s;
+            break;
+          }
+        }
+      }
+    }
     if (session && session.state === SessionState.ACTIVE) {
       return { success: true, session };
     }

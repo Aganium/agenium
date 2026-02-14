@@ -70,4 +70,32 @@ export enum ToolErrorCode {
   DUPLICATE = 'TOOL_DUPLICATE',
   INVALID_INPUT = 'TOOL_INVALID_INPUT',
   HANDLER_ERROR = 'TOOL_HANDLER_ERROR',
+  /** Remote agent returned an error during tool.invoke */
+  REMOTE_ERROR = 'TOOL_REMOTE_ERROR',
+  /** Session not active — cannot invoke remote tool */
+  SESSION_NOT_ACTIVE = 'TOOL_SESSION_NOT_ACTIVE',
+  /** Connection or resolution failed for remote call */
+  REMOTE_UNREACHABLE = 'TOOL_REMOTE_UNREACHABLE',
+}
+
+/**
+ * Result of listing tools on a remote agent.
+ */
+export interface RemoteToolListResult {
+  /** Tools exposed by the remote agent */
+  tools: AgentTool[];
+  /** Session used for the query */
+  sessionId: string;
+}
+
+/**
+ * Result of invoking a tool on a remote agent.
+ */
+export interface RemoteToolInvokeResult {
+  /** Tool name that was invoked */
+  tool: string;
+  /** Return value from the remote handler */
+  output: unknown;
+  /** Session used for the invocation */
+  sessionId: string;
 }

@@ -91,6 +91,8 @@ export {
   type ToolContext,
   type ToolInvokeResult,
   type RegisteredTool,
+  type RemoteToolListResult,
+  type RemoteToolInvokeResult,
 } from './tools/index.js';
 
 // High-level Agent API
