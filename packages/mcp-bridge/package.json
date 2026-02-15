@@ -1,6 +1,6 @@
 {
   "name": "@agenium/mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Bridge MCP (Model Context Protocol) servers to the AGENIUM agent:// network",
   "type": "module",
   "main": "dist/index.js",
@@ -32,7 +32,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/agenium-org/agenium"
+    "url": "https://github.com/Aganium/agenium",
+    "directory": "packages/mcp-bridge"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
@@ -48,5 +49,6 @@
   },
   "engines": {
     "node": ">=20.0.0"
-  }
+  },
+  "mcpName": "io.github.aganium/mcp-server"
 }
