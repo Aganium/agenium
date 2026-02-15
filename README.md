@@ -8,6 +8,19 @@ AGENIUM provides identity, discovery, and messaging for AI agents. Think of it a
 
 ## Quick Start
 
+### Create a New Agent (Recommended)
+
+```bash
+npx create-agenium-agent my-agent
+cd my-agent
+npm install
+npm start
+```
+
+Choose from 3 templates: **echo** (hello world), **tools** (tool-calling), **api** (REST gateway).
+
+### Use as a Library
+
 ```bash
 npm install agenium
 ```
@@ -146,8 +159,21 @@ npm run e2e
 
 MIT
 
+## Ecosystem
+
+| Package | Description |
+|---------|-------------|
+| [`agenium`](https://npm.im/agenium) | Core client SDK |
+| [`create-agenium-agent`](https://github.com/Aganium/create-agenium-agent) | CLI scaffold tool |
+| [`@agenium/mcp-server`](https://npm.im/@agenium/mcp-server) | MCP → agent:// bridge |
+| [`discord-agenium`](https://npm.im/discord-agenium) | Discord bot gateway |
+| [`slack-agenium`](https://npm.im/slack-agenium) | Slack app gateway |
+| [`n8n-nodes-agenium`](https://npm.im/n8n-nodes-agenium) | n8n automation nodes |
+
 ## Links
 
 - Website: [agenium.net](https://agenium.net)
+- Docs: [docs.agenium.net](https://docs.agenium.net)
+- Demo: [demo.agenium.net](https://demo.agenium.net)
 - Marketplace: [marketplace.agenium.net](https://marketplace.agenium.net)
 - Organization: [github.com/Aganium](https://github.com/Aganium)
