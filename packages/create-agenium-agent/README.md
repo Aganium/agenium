@@ -1,11 +1,11 @@
-# create-agenium-agent
+# @agenium/create-agent
 
 Scaffold an [AGENIUM](https://agenium.net) agent in under 3 minutes.
 
 ## Quick Start
 
 ```bash
-npx create-agenium-agent my-agent
+npx @agenium/create-agent my-agent
 cd my-agent
 npm run dev
 ```
@@ -14,16 +14,16 @@ npm run dev
 
 ```bash
 # Interactive mode (prompts for all options)
-npx create-agenium-agent
+npx @agenium/create-agent
 
 # Named project
-npx create-agenium-agent my-agent
+npx @agenium/create-agent my-agent
 
 # Skip prompts — use defaults
-npx create-agenium-agent my-agent --yes
+npx @agenium/create-agent my-agent --yes
 
 # Choose a template
-npx create-agenium-agent my-agent --template=tools
+npx @agenium/create-agent my-agent --template=tools
 
 # From GitHub (if npm is unavailable)
 git clone https://github.com/Aganium/agenium.git

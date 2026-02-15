@@ -1,5 +1,5 @@
 {
-  "name": "create-agenium-agent",
+  "name": "@agenium/create-agent",
   "version": "1.0.0",
   "description": "Scaffold an AGENIUM agent in under 3 minutes",
   "bin": {

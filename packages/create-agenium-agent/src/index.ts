@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * create-agenium-agent — scaffold an AGENIUM agent in under 3 minutes
+ * @agenium/create-agent — scaffold an AGENIUM agent in under 3 minutes
  *
  * Usage:
- *   npx create-agenium-agent                           # interactive
- *   npx create-agenium-agent my-agent                   # name from arg
- *   npx create-agenium-agent my-agent --template=echo   # skip template prompt
- *   npx create-agenium-agent my-agent --yes             # all defaults, no prompts
+ *   npx @agenium/create-agent                           # interactive
+ *   npx @agenium/create-agent my-agent                   # name from arg
+ *   npx @agenium/create-agent my-agent --template=echo   # skip template prompt
+ *   npx @agenium/create-agent my-agent --yes             # all defaults, no prompts
  */
 
 import prompts from 'prompts';
@@ -37,7 +37,7 @@ const TEMPLATES: Record<string, { label: string; desc: string }> = {
 function banner() {
   console.log(`
   ╔═══════════════════════════════════════════════════╗
-  ║   🤖  create-agenium-agent                       ║
+  ║   🤖  @agenium/create-agent                       ║
   ║   Build your first agent:// in under 3 minutes   ║
   ╚═══════════════════════════════════════════════════╝
 `);
