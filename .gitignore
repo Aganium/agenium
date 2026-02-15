@@ -3,3 +3,4 @@ dist/
 *.log
 .DS_Store
 packages/create-agenium-agent/*.tgz
+!blueprints/**/sample.log
