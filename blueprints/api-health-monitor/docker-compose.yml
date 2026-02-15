@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  api-health:
+    build:
+      context: ../..
+      dockerfile: blueprints/api-health-monitor/Dockerfile
+    ports:
+      - '9011:9011'
+    environment:
+      - PORT=9011
+      - ENDPOINTS=https://api.example.com/health,https://myapp.com/ping
+      - CHECK_INTERVAL=60
+      - TIMEOUT_MS=10000
+      # Uncomment for DNS registration:
+      # - DNS_API_KEY=dom_xxx
+      # - PUBLIC_HOST=myserver.com
+    restart: unless-stopped

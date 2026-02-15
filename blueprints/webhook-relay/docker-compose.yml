@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  webhook-relay:
+    build:
+      context: ../..
+      dockerfile: blueprints/webhook-relay/Dockerfile
+    ports:
+      - '9012:9012'     # Agent protocol
+      - '10012:10012'   # Webhook HTTP listener
+    environment:
+      - PORT=9012
+      - MAX_EVENTS=5000
+      # - WEBHOOK_SECRET=your-shared-secret
+      # - DNS_API_KEY=dom_xxx
+      # - PUBLIC_HOST=myserver.com
+    restart: unless-stopped
