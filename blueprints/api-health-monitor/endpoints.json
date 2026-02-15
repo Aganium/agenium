@@ -1,0 +1,26 @@
+[
+  {
+    "name": "AGENIUM Marketplace",
+    "url": "https://agenium.net/api/health",
+    "method": "GET",
+    "expectedStatus": 200
+  },
+  {
+    "name": "AGENIUM Search",
+    "url": "https://search.agenium.net/health",
+    "method": "GET",
+    "expectedStatus": 200
+  },
+  {
+    "name": "GitHub API",
+    "url": "https://api.github.com",
+    "method": "GET",
+    "expectedStatus": 200
+  },
+  {
+    "name": "Example API",
+    "url": "https://httpbin.org/status/200",
+    "method": "GET",
+    "expectedStatus": 200
+  }
+]
