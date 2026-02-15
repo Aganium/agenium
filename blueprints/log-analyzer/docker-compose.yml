@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  log-analyzer:
+    build:
+      context: ../..
+      dockerfile: blueprints/log-analyzer/Dockerfile
+    ports:
+      - '9010:9010'
+    volumes:
+      - /var/log:/logs:ro
+    environment:
+      - LOG_PATH=/logs/nginx/access.log
+      - LOG_FORMAT=auto
+      - PORT=9010
+      - MAX_LINES=10000
+      # Uncomment for DNS registration:
+      # - DNS_API_KEY=dom_xxx
+      # - PUBLIC_HOST=myserver.com
+    restart: unless-stopped
