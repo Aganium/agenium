@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Aganium/mcp-server",
+  "description": "Bridge MCP (Model Context Protocol) servers to the AGENIUM agent:// network. Enables any MCP server to be discovered and connected via agent:// protocol with DNS-based resolution, mTLS security, and stateful sessions.",
+  "repository": {
+    "url": "https://github.com/Aganium/agenium",
+    "source": "github",
+    "subfolder": "packages/mcp-bridge"
+  },
+  "version": "0.1.4",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@agenium/mcp-server",
+      "version": "0.1.4",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

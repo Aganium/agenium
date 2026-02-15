@@ -1,6 +1,6 @@
 {
   "name": "@agenium/mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "Bridge MCP (Model Context Protocol) servers to the AGENIUM agent:// network",
   "type": "module",
   "main": "dist/index.js",
@@ -48,5 +48,6 @@
   },
   "engines": {
     "node": ">=20.0.0"
-  }
+  },
+  "mcpName": "io.github.Aganium/mcp-server"
 }
