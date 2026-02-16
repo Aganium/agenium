@@ -1,27 +1,54 @@
-# AGENIUM
+<p align="center">
+  <img src="https://agenium.net/logo.png" alt="AGENIUM" width="120" />
+</p>
 
-> 🔍 **Can't find the right MCP server?** [Search 2,000+ MCP servers instantly →](https://agenium.net/search)
+<h1 align="center">AGENIUM</h1>
 
-Stateful agent-to-agent communication client for the `agent://` protocol.
+<p align="center">
+  <b>DNS of the Agent Web</b> — Identity, discovery & communication for AI agents.
+</p>
 
-## What is AGENIUM?
+<p align="center">
+  <a href="https://www.npmjs.com/package/agenium"><img src="https://img.shields.io/npm/v/agenium.svg" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/agenium"><img src="https://img.shields.io/npm/dm/agenium.svg" alt="npm downloads" /></a>
+  <a href="https://github.com/Aganium/agenium/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/agenium.svg" alt="license" /></a>
+  <a href="https://github.com/Aganium/agenium"><img src="https://img.shields.io/github/stars/Aganium/agenium" alt="GitHub stars" /></a>
+</p>
 
-AGENIUM provides identity, discovery, and messaging for AI agents. Think of it as DNS + HTTP for agents — each agent gets a unique `agent://name` URI and can discover and communicate with other agents.
+<p align="center">
+  <a href="https://docs.agenium.net?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core">Docs</a> •
+  <a href="https://demo.agenium.net?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core">Live Demo</a> •
+  <a href="https://agenium.net/search?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core">MCP Search</a> •
+  <a href="https://discord.gg/agenium">Discord</a>
+</p>
 
-## Quick Start
+---
 
-### Create a New Agent (Recommended)
+## The Problem
+
+AI agents can't find each other. MCP gives agents **tools**, but there's no standard way for agents to get **identity**, **discovery**, or **direct communication**. Every integration is point-to-point.
+
+## The Solution
+
+AGENIUM is **DNS for AI agents**. Every agent gets a unique `agent://name` URI. Agents discover each other by name, verify trust, and communicate — just like websites use domain names.
+
+```
+agent://weather  →  resolves to endpoint + capabilities + trust score
+agent://search   →  find any agent by what it does
+agent://my-bot   →  your agent, your identity
+```
+
+## Get Started in 60 Seconds
 
 ```bash
 npx @agenium/create-agent my-agent
 cd my-agent
-npm install
 npm start
 ```
 
-Choose from 3 templates: **echo** (hello world), **tools** (tool-calling), **api** (REST gateway).
+**That's it.** Your agent is live on the `agent://` network.
 
-### Use as a Library
+Or use as a library:
 
 ```bash
 npm install agenium
@@ -31,158 +58,82 @@ npm install agenium
 import { AgeniumClient } from 'agenium';
 
 const client = new AgeniumClient({
-  apiKey: 'dom_your_api_key_here',  // Get one at marketplace.agenium.net
+  apiKey: 'dom_your_key',
   agentUri: 'agent://myagent',
 });
 
-// Resolve another agent
+// Discover any agent by name
 const target = await client.resolve('agent://search');
-console.log(target.endpoint); // https://...
 
-// Connect and send message
+// Connect and communicate
 const session = await client.connect('agent://search');
-await session.send({ query: 'find MCP servers for GitHub' });
+await session.send({ query: 'find weather tools' });
 const response = await session.receive();
 ```
 
+## Why AGENIUM?
+
+| Feature | Without AGENIUM | With AGENIUM |
+|---------|----------------|--------------|
+| **Identity** | Hardcoded URLs | `agent://name` URIs |
+| **Discovery** | Manual config | DNS-style resolution |
+| **Communication** | REST/WebSocket patchwork | Stateful sessions + mTLS |
+| **Trust** | None | Capability manifests + trust scores |
+| **MCP Integration** | Tools only | Tools → discoverable agents |
+
 ## Features
 
-- **`agent://` Protocol** — Unique agent identity via URI scheme
-- **DNS Resolution** — Discover agents by name (`agent://name` → endpoint)
-- **Stateful Sessions** — SQLite-backed persistent sessions
+- **`agent://` Protocol** — Unique identity via URI scheme (like `https://` for agents)
+- **DNS Resolution** — `agent://name` → endpoint + capabilities
+- **MCP Bridge** — Any MCP server → discoverable agent ([`@agenium/mcp-server`](https://www.npmjs.com/package/@agenium/mcp-server?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core))
+- **Stateful Sessions** — SQLite-backed persistent conversations
 - **HTTP/2 + mTLS** — Secure transport with mutual TLS
-- **At-Least-Once Delivery** — Outbox pattern for reliable messaging
-- **Circuit Breakers** — Automatic failure detection and recovery
-- **Prometheus Metrics** — Built-in observability
+- **At-Least-Once Delivery** — Outbox pattern with retries
+- **Capability Manifests** — Agents declare what they can do
+- **56 Tests** — Unit, integration, and E2E coverage
 
-## Getting an API Key
+## Ecosystem
 
-1. Visit [marketplace.agenium.net](https://marketplace.agenium.net)
-2. Register a domain name (e.g., `agent://myagent`)
-3. Complete purchase (TON payment)
-4. Save your API key (shown only once)
-
-## CLI
-
-```bash
-# Initialize agent configuration
-agenium init
-
-# Resolve an agent
-agenium resolve agent://search
-
-# Check connection
-agenium status
-
-# End-to-end connectivity test
-agenium e2e
-```
+| Package | What it does |
+|---------|-------------|
+| [`agenium`](https://www.npmjs.com/package/agenium) | Core client SDK |
+| [`@agenium/create-agent`](https://www.npmjs.com/package/@agenium/create-agent?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core) | Scaffold agents in 60 seconds |
+| [`@agenium/mcp-server`](https://www.npmjs.com/package/@agenium/mcp-server?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core) | Bridge MCP servers → agent:// network |
+| [`discord-agenium`](https://www.npmjs.com/package/discord-agenium?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core) | Discord bot gateway |
+| [`slack-agenium`](https://www.npmjs.com/package/slack-agenium?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core) | Slack app gateway |
+| [`n8n-nodes-agenium`](https://www.npmjs.com/package/n8n-nodes-agenium?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core) | n8n automation nodes |
+| [`agenium`](https://pypi.org/project/agenium/?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core) (PyPI) | Python SDK |
 
 ## Architecture
 
 ```
-agent://myagent                    agent://search
-     │                                  │
-     ├── resolve("agent://search") ────►│
-     │   (DNS lookup via marketplace)   │
-     │◄── endpoint: https://...  ───────┤
-     │                                  │
-     ├── POST /a2a/message ────────────►│
-     │   (HTTP/2 + mTLS)               │
-     │◄── response ────────────────────┤
+Your Agent                              Remote Agent
+agent://mybot                          agent://weather
+     │                                      │
+     ├── resolve("agent://weather") ───────►│
+     │   (DNS via AGENIUM network)          │
+     │◄── endpoint + capabilities ──────────┤
+     │                                      │
+     ├── connect (HTTP/2 + mTLS) ──────────►│
+     │   (stateful session)                 │
+     │◄── response ─────────────────────────┤
 ```
 
-## Configuration
+## 🔍 Find MCP Servers
 
-```typescript
-const client = new AgeniumClient({
-  // Required
-  apiKey: 'dom_xxx',           // Your marketplace API key
-  agentUri: 'agent://myname',  // Your agent URI
+**[Search 2,000+ MCP servers →](https://agenium.net/search?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core)**
 
-  // Optional
-  dnsServer: 'https://marketplace.agenium.net',  // DNS resolver
-  dataDir: './data',           // SQLite session storage
-  timeout: 30000,              // Request timeout (ms)
-  retries: 3,                  // Max retry attempts
-});
-```
-
-## API Reference
-
-### `client.resolve(agentUri)`
-Resolve an agent URI to its endpoint and capabilities.
-
-### `client.connect(agentUri)`
-Establish a stateful session with another agent.
-
-### `session.send(message)`
-Send a message in an active session.
-
-### `session.receive()`
-Receive the next message in a session.
-
-### `session.close()`
-Gracefully close a session.
-
-## Protocol Services
-
-The AGENIUM ecosystem includes:
-
-| Service | URI | Description |
-|---------|-----|-------------|
-| Search | `agent://agenium` | Agent & tool discovery engine |
-| Marketplace | [marketplace.agenium.net](https://marketplace.agenium.net) | Domain registration & credentials |
-
-## Development
-
-```bash
-# Install dependencies
-npm install
-
-# Run tests
-npm test
-
-# Build
-npm run build
-
-# Run E2E tests
-npm run e2e
-```
-
-## Tests
-
-56 tests passing:
-- 22 unit tests
-- 24 bug-server integration tests
-- 10 end-to-end tests
-
-## License
-
-MIT
-
-## Ecosystem
-
-| Package | Description |
-|---------|-------------|
-| [`agenium`](https://npm.im/agenium) | Core client SDK |
-| [`@agenium/create-agent`](https://github.com/Aganium/create-agenium-agent) | CLI scaffold tool |
-| [`@agenium/mcp-server`](https://npm.im/@agenium/mcp-server) | MCP → agent:// bridge |
-| [`discord-agenium`](https://npm.im/discord-agenium) | Discord bot gateway |
-| [`slack-agenium`](https://npm.im/slack-agenium) | Slack app gateway |
-| [`n8n-nodes-agenium`](https://npm.im/n8n-nodes-agenium) | n8n automation nodes |
-
-## 🔍 MCP Server Search
-
-Looking for MCP servers to connect your agents to? **[Search 2,000+ MCP servers →](https://agenium.net/search)**
-
-Find tools, APIs, and services your agents can use — searchable by capability, language, and use case.
+Looking for AI tools to connect to? Search by capability, language, or use case.
 
 ## Links
 
-- **MCP Search: [agenium.net/search](https://agenium.net/search)**
-- Website: [agenium.net](https://agenium.net)
-- Docs: [docs.agenium.net](https://docs.agenium.net)
-- Demo: [demo.agenium.net](https://demo.agenium.net)
-- Marketplace: [marketplace.agenium.net](https://marketplace.agenium.net)
-- Organization: [github.com/Aganium](https://github.com/Aganium)
+- 📖 **[Documentation](https://docs.agenium.net?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core)**
+- 🤖 **[Live Demo](https://demo.agenium.net?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core)** — Try 4 working agents
+- 🔍 **[MCP Search](https://agenium.net/search?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core)** — Find any MCP server
+- 💬 **[Discord](https://discord.gg/agenium)** — Community & support
+- 🐦 **[Twitter/X](https://x.com/AgeniumPlatform)**
+- 📝 **[Blog](https://dev.to/agenium_platform?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core)**
+
+## License
+
+MIT © [AGENIUM](https://agenium.net?utm_source=npm&utm_medium=readme&utm_campaign=agenium-core)

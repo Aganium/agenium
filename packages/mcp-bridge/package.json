@@ -1,7 +1,7 @@
 {
   "name": "@agenium/mcp-server",
-  "version": "0.1.6",
-  "description": "Bridge MCP (Model Context Protocol) servers to the AGENIUM agent:// network",
+  "version": "0.1.7",
+  "description": "Bridge any MCP server to the agent:// network — make your tools discoverable, callable, and composable by other AI agents.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -20,13 +20,20 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": [
-    "agenium",
     "mcp",
     "model-context-protocol",
+    "mcp-server",
+    "mcp-bridge",
     "agent",
-    "bridge",
-    "ai",
-    "tools"
+    "ai-agent",
+    "agent-discovery",
+    "agenium",
+    "agent-protocol",
+    "mcp-tools",
+    "ai-tools",
+    "llm-tools",
+    "mcp-integration",
+    "agent-network"
   ],
   "author": "AGENIUM",
   "license": "MIT",

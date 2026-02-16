@@ -1,7 +1,7 @@
 {
   "name": "@agenium/create-agent",
-  "version": "1.0.1",
-  "description": "Scaffold an AGENIUM agent in under 3 minutes",
+  "version": "1.0.2",
+  "description": "Create a discoverable AI agent in 60 seconds — scaffolds a production-ready agent on the AGENIUM agent:// network with identity, discovery & MCP support.",
   "bin": {
     "create-agenium-agent": "./dist/index.js"
   },
@@ -16,12 +16,17 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": [
+    "create-agent",
+    "agent-scaffold",
+    "ai-agent",
+    "agent-template",
+    "mcp",
+    "agent-discovery",
     "agenium",
-    "agent",
-    "a2a",
-    "scaffold",
-    "create",
-    "cli"
+    "agent-protocol",
+    "agent-boilerplate",
+    "mcp-server",
+    "agent-starter"
   ],
   "author": "AGENIUM <team@agenium.net>",
   "license": "MIT",

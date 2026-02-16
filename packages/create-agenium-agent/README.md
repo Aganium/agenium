@@ -1,82 +1,112 @@
-# @agenium/create-agent
+<p align="center">
+  <b>@agenium/create-agent</b>
+</p>
 
-> 🔍 **Looking for MCP servers to connect?** [Search 2,000+ MCP servers →](https://agenium.net/search)
+<h2 align="center">Create an AI Agent in 60 Seconds</h2>
 
-Scaffold an [AGENIUM](https://agenium.net) agent in under 3 minutes.
+<p align="center">
+  Scaffold a production-ready agent on the <a href="https://agenium.net?utm_source=npm&utm_medium=readme&utm_campaign=create-agent">AGENIUM</a> <code>agent://</code> network — with identity, discovery, and communication built in.
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@agenium/create-agent"><img src="https://img.shields.io/npm/v/@agenium/create-agent.svg" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@agenium/create-agent"><img src="https://img.shields.io/npm/dm/@agenium/create-agent.svg" alt="npm downloads" /></a>
+  <a href="https://github.com/Aganium/agenium/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@agenium/create-agent.svg" alt="license" /></a>
+</p>
+
+<p align="center">
+  <a href="https://docs.agenium.net?utm_source=npm&utm_medium=readme&utm_campaign=create-agent">Docs</a> •
+  <a href="https://demo.agenium.net?utm_source=npm&utm_medium=readme&utm_campaign=create-agent">Live Demo</a> •
+  <a href="https://agenium.net/search?utm_source=npm&utm_medium=readme&utm_campaign=create-agent">Find MCP Servers</a> •
+  <a href="https://discord.gg/agenium">Discord</a>
+</p>
+
+---
 
 ## Quick Start
 
 ```bash
 npx @agenium/create-agent my-agent
 cd my-agent
-npm run dev
+npm start
 ```
 
-## Usage
+**Done.** Your agent has an `agent://my-agent` identity and is live on the network.
 
-```bash
-# Interactive mode (prompts for all options)
-npx @agenium/create-agent
+## Why?
 
-# Named project
-npx @agenium/create-agent my-agent
+Building an AI agent shouldn't require wiring up HTTP servers, TLS certs, and service discovery from scratch. This scaffold gives you:
 
-# Skip prompts — use defaults
-npx @agenium/create-agent my-agent --yes
-
-# Choose a template
-npx @agenium/create-agent my-agent --template=tools
-
-# From GitHub (if npm is unavailable)
-git clone https://github.com/Aganium/agenium.git
-node agenium/packages/create-agenium-agent/dist/index.js my-agent
-```
+- ✅ **Identity** — `agent://name` URI on the AGENIUM network
+- ✅ **Discovery** — Other agents find yours by name
+- ✅ **Communication** — Stateful sessions with mTLS
+- ✅ **Docker** — Production-ready container included
+- ✅ **TypeScript** — Full type safety
 
 ## Templates
 
-| Template | Description |
-|----------|-------------|
-| `echo`   | Minimal agent — echo, ping, info tools |
-| `tools`  | Custom tools starter — add your own logic |
-| `api`    | API wrapper — expose a REST API as agent tools |
+| Template | Best for | What you get |
+|----------|----------|-------------|
+| `echo` | Hello world | Minimal agent — echo, ping, info |
+| `tools` | Custom logic | Add your own tools and handlers |
+| `api` | REST wrappers | Expose any REST API as agent tools |
+
+```bash
+# Choose a template
+npx @agenium/create-agent my-agent --template=tools
+
+# Non-interactive (use defaults)
+npx @agenium/create-agent my-agent --yes
+```
 
 ## What Gets Generated
 
 ```
 my-agent/
-├── src/index.ts      # Agent implementation
-├── package.json       # Dependencies (agenium@^0.2.0)
-├── tsconfig.json      # TypeScript config
-├── Dockerfile         # Production Docker image
-├── .env               # Environment variables
-├── .env.example       # Template for env vars
-├── .gitignore
-└── README.md          # Project-specific docs
+├── src/index.ts      # Your agent (edit this!)
+├── package.json      # agenium SDK pre-installed
+├── tsconfig.json     # TypeScript ready
+├── Dockerfile        # Deploy anywhere
+├── .env              # API key goes here
+└── README.md         # Project docs
 ```
 
-## Next Steps After Scaffolding
+## Next Steps
 
-1. **Edit** `src/index.ts` — add your own tools
-2. **Run** `npm run dev` — starts the agent locally
-3. **Register** — get an API key from [marketplace.agenium.net](https://marketplace.agenium.net) to register on the `agent://` network
+1. **Edit** `src/index.ts` — add your tools and logic
+2. **Run** `npm run dev` — test locally
+3. **Register** at [marketplace.agenium.net](https://marketplace.agenium.net?utm_source=npm&utm_medium=readme&utm_campaign=create-agent) — get your API key
 4. **Deploy** — `npm run docker:build` for production
 
 ## Options
 
 | Flag | Description |
 |------|-------------|
-| `--template=<name>` | Template: `echo`, `tools`, `api` |
+| `--template=<name>` | `echo`, `tools`, or `api` |
 | `--port=<number>` | Listen port (default: 9001) |
-| `--yes` / `-y` | Non-interactive, use all defaults |
-| `--no-install` | Skip `npm install` |
-| `--no-git` | Skip `git init` |
+| `--yes` / `-y` | Non-interactive mode |
+| `--no-install` | Skip npm install |
+| `--no-git` | Skip git init |
+
+## Part of the AGENIUM Ecosystem
+
+| Package | Description |
+|---------|-------------|
+| [`agenium`](https://www.npmjs.com/package/agenium?utm_source=npm&utm_medium=readme&utm_campaign=create-agent) | Core agent SDK |
+| **`@agenium/create-agent`** | **← You are here** |
+| [`@agenium/mcp-server`](https://www.npmjs.com/package/@agenium/mcp-server?utm_source=npm&utm_medium=readme&utm_campaign=create-agent) | Bridge MCP servers → agent:// |
+
+## 🔍 Find MCP Servers
+
+**[Search 2,000+ MCP servers →](https://agenium.net/search?utm_source=npm&utm_medium=readme&utm_campaign=create-agent)**
 
 ## Links
 
-- 📖 [Documentation](https://docs.agenium.net)
-- 🤖 [AGENIUM Protocol](https://agenium.net)
-- 💬 [Community](https://discord.gg/agenium)
+- 📖 [Documentation](https://docs.agenium.net?utm_source=npm&utm_medium=readme&utm_campaign=create-agent)
+- 🤖 [Live Demo](https://demo.agenium.net?utm_source=npm&utm_medium=readme&utm_campaign=create-agent)
+- 💬 [Discord](https://discord.gg/agenium)
+- 🐦 [Twitter/X](https://x.com/AgeniumPlatform)
 
 ## License
 
-MIT
+MIT © [AGENIUM](https://agenium.net?utm_source=npm&utm_medium=readme&utm_campaign=create-agent)
