@@ -1,6 +1,6 @@
 {
   "name": "agenium",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Local, stateful agent-to-agent client software with automatic bug reporting",
   "type": "module",
   "main": "dist/index.js",
@@ -22,7 +22,8 @@
     "dist",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "scripts/postinstall.js"
   ],
   "scripts": {
     "build": "tsc",
