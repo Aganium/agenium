@@ -4,3 +4,4 @@ dist/
 .DS_Store
 packages/create-agenium-agent/*.tgz
 !blueprints/**/sample.log
+packages/mcp-bridge/.mcpregistry_github_token
