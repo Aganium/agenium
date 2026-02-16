@@ -1,5 +1,7 @@
 # @agenium/mcp-server
 
+> 🔍 **Need to find MCP servers?** [Search 2,000+ MCP servers instantly →](https://agenium.net/search)
+
 Bridge [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) servers to the [AGENIUM](https://agenium.net) `agent://` network.
 
 Any MCP server → discoverable, callable agent on the AGENIUM network.
@@ -158,6 +160,10 @@ bridge.on('stopped', () => { ... });
 ## Python SDK
 
 A Python version (`agenium-mcp-server`) is planned. For now, use the npm package.
+
+## 🔍 Find MCP Servers
+
+**[Search 2,000+ MCP servers →](https://agenium.net/search)** — Find tools, APIs, and services to bridge to the agent:// network.
 
 ## License
 

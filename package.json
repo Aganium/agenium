@@ -1,6 +1,6 @@
 {
   "name": "agenium",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local, stateful agent-to-agent client software with automatic bug reporting",
   "type": "module",
   "main": "dist/index.js",
@@ -32,7 +32,8 @@
     "e2e": "npx tsx e2e-test.ts",
     "test:integration": "npx tsx test/integration-marketplace.ts",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run build && npm test",
+    "postinstall": "node scripts/postinstall.js"
   },
   "engines": {
     "node": ">=20.0.0"

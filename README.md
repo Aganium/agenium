@@ -1,5 +1,7 @@
 # AGENIUM
 
+> 🔍 **Can't find the right MCP server?** [Search 2,000+ MCP servers instantly →](https://agenium.net/search)
+
 Stateful agent-to-agent communication client for the `agent://` protocol.
 
 ## What is AGENIUM?
@@ -170,8 +172,15 @@ MIT
 | [`slack-agenium`](https://npm.im/slack-agenium) | Slack app gateway |
 | [`n8n-nodes-agenium`](https://npm.im/n8n-nodes-agenium) | n8n automation nodes |
 
+## 🔍 MCP Server Search
+
+Looking for MCP servers to connect your agents to? **[Search 2,000+ MCP servers →](https://agenium.net/search)**
+
+Find tools, APIs, and services your agents can use — searchable by capability, language, and use case.
+
 ## Links
 
+- **MCP Search: [agenium.net/search](https://agenium.net/search)**
 - Website: [agenium.net](https://agenium.net)
 - Docs: [docs.agenium.net](https://docs.agenium.net)
 - Demo: [demo.agenium.net](https://demo.agenium.net)

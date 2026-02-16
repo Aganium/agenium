@@ -1,5 +1,7 @@
 # @agenium/create-agent
 
+> 🔍 **Looking for MCP servers to connect?** [Search 2,000+ MCP servers →](https://agenium.net/search)
+
 Scaffold an [AGENIUM](https://agenium.net) agent in under 3 minutes.
 
 ## Quick Start

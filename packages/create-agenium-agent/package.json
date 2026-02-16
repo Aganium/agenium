@@ -1,6 +1,6 @@
 {
   "name": "@agenium/create-agent",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Scaffold an AGENIUM agent in under 3 minutes",
   "bin": {
     "create-agenium-agent": "./dist/index.js"
