@@ -6,6 +6,10 @@ Stateful agent-to-agent communication client for the `agent://` protocol.
 
 AGENIUM provides identity, discovery, and messaging for AI agents. Think of it as DNS + HTTP for agents — each agent gets a unique `agent://name` URI and can discover and communicate with other agents.
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/aganium-agenium).
+
 ## Quick Start
 
 ### Create a New Agent (Recommended)
