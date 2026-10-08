@@ -3,6 +3,8 @@ name: Publish to npm
 on:
   release:
     types: [published]
+  # manual re-run after fixing npm auth, without cutting a new release
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -18,6 +20,10 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      # npm trusted publishing (OIDC, no long-lived token) needs npm >= 11.5.1;
+      # Node 22 ships npm 10. NODE_AUTH_TOKEN below stays as a fallback.
+      - run: npm install -g npm@latest
 
       - run: npm ci
 
