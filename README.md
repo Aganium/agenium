@@ -55,20 +55,17 @@ npm install agenium
 ```
 
 ```typescript
-import { AgeniumClient } from 'agenium';
+import { createAgent } from 'agenium';
 
-const client = new AgeniumClient({
-  apiKey: 'dom_your_key',
-  agentUri: 'agent://myagent',
-});
+const agent = createAgent('myagent');
+await agent.start();
 
-// Discover any agent by name
-const target = await client.resolve('agent://search');
+// Publish agent://myagent on dns.agenium.net. No API key: the request is
+// signed with the agent's Ed25519 identity key, which then owns the name.
+await agent.register({ host: 'myagent.example.com' });
 
-// Connect and communicate
-const session = await client.connect('agent://search');
-await session.send({ query: 'find weather tools' });
-const response = await session.receive();
+// Connect to any agent by name
+const { session } = await agent.connect('agent://search');
 ```
 
 ## Why AGENIUM?

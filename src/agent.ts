@@ -22,7 +22,7 @@ import {
 
 import { SessionManager, createSessionManager } from './state/session-manager.js';
 import { BugReporter, getBugReporter } from './bug-report/reporter.js';
-import { DNSResolver, ResolvedAgent, DNSErrorCode } from './dns/index.js';
+import { DNSResolver, ResolvedAgent, DNSErrorCode, dnsRegisterMessage, dnsDeleteMessage } from './dns/index.js';
 import {
   ToolRegistry,
   ToolHandler,
@@ -48,7 +48,7 @@ import {
   DEFAULT_CAPABILITIES,
 } from './transport/handshake.js';
 
-import { initializeKeys, KeyStore } from './crypto/keys.js';
+import { initializeKeys, KeyStore, signWithAgentKey } from './crypto/keys.js';
 import { initializeCA, createAgentCert, CAInfo, CertificateInfo } from './crypto/certs.js';
 
 import {
@@ -149,8 +149,8 @@ export class Agent extends EventEmitter {
   // Tool registry
   private toolRegistry: ToolRegistry;
   
-  // DNS API key (set via register())
-  private dnsApiKey: string | null = null;
+  // Host passed to the last successful register(), reused by syncTools()
+  private registeredHost: string | null = null;
   
   private isRunning: boolean = false;
 
@@ -521,15 +521,30 @@ export class Agent extends EventEmitter {
   // ============================================================================
 
   /**
-   * Register this agent (endpoint + tools + capabilities) with the DNS bridge.
+   * Register this agent (endpoint + tools + capabilities) with the AGENIUM DNS
+   * registry. The request is signed with this agent's Ed25519 identity key:
+   * the first registration binds the name to that key, and only the same key
+   * can update or remove it afterwards.
    *
-   * @param apiKey  Marketplace API key (dom_xxx)
-   * @param host    Public hostname/IP where this agent is reachable
+   * @param options.host  Public hostname/IP where this agent is reachable
+   *
+   * The pre-0.3 form `register(apiKey, host?)` still works; the marketplace
+   * API key is no longer needed and is ignored.
    */
-  async register(apiKey: string, host?: string): Promise<DNSRegistrationResult> {
-    this.dnsApiKey = apiKey;
+  async register(options?: { host?: string } | string, legacyHost?: string): Promise<DNSRegistrationResult> {
+    let host: string | undefined;
+    if (typeof options === 'string') {
+      // legacy (apiKey, host) call shape
+      host = legacyHost;
+    } else {
+      host = options?.host;
+    }
+
+    const name = this.identity.name.toLowerCase();
     const endpoint = this.getEndpoint(host);
+    const publicKey = this.identity.publicKey;
     const tools = this.toolRegistry.definitions();
+    const timestamp = Date.now();
 
     this.bugReporter.recordAction('dns_register', {
       endpoint,
@@ -537,53 +552,48 @@ export class Agent extends EventEmitter {
     });
 
     try {
-      // DNS bridge is on the marketplace server
-      const bridgeUrl = this.config.dnsServer.replace(/:\d+$/, '') + ':3004';
-      const protocol = 'http';
-      const url = `${protocol}://${bridgeUrl}/agent/endpoint`;
+      const signature = signWithAgentKey(
+        Buffer.from(dnsRegisterMessage(name, endpoint, publicKey, timestamp)),
+        this.keys.agentKeys.privateKey,
+      );
 
-      const response = await fetch(url, {
+      const response = await fetch(`${this.resolver.baseUrl()}/api/agents/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
           'User-Agent': `AGENIUM/${this.identity.name}`,
         },
         body: JSON.stringify({
+          name,
+          publicKey,
           endpoint,
+          description: this.identity.description,
           capabilities: ['messaging', 'tools'],
+          protocolVersions: ['1.0'],
           tools,
-          metadata: {
-            version: '0.1.0',
-            registeredAt: new Date().toISOString(),
-            toolCount: tools.length,
-          },
+          metadata: { toolCount: tools.length },
+          timestamp,
+          signature,
         }),
         signal: AbortSignal.timeout(15000),
       });
 
-      const data = await response.json() as {
-        success: boolean;
-        data?: { domain: string; tools: AgentTool[] };
+      const data = await response.json().catch(() => ({})) as {
+        success?: boolean;
         error?: { code: string; message: string };
       };
 
-      if (!data.success) {
-        const errMsg = data.error?.message ?? `HTTP ${response.status}`;
+      if (!response.ok || !data.success) {
+        const errMsg = data.error ? `${data.error.code}: ${data.error.message}` : `HTTP ${response.status}`;
         this.bugReporter.report('connection', 'DNS_REGISTER_FAILED', errMsg);
         return { success: false, error: errMsg };
       }
 
-      this.emit('registered', {
-        domain: data.data?.domain,
-        tools: tools.length,
-      });
+      this.registeredHost = host ?? null;
+      this.resolver.invalidate(name);
+      this.emit('registered', { domain: name, tools: tools.length });
 
-      return {
-        success: true,
-        domain: data.data?.domain,
-        tools: tools.length,
-      };
+      return { success: true, domain: name, tools: tools.length };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.bugReporter.report('connection', 'DNS_REGISTER_ERROR', msg);
@@ -592,35 +602,41 @@ export class Agent extends EventEmitter {
   }
 
   /**
-   * Remove this agent's endpoint from DNS.
+   * Remove this agent's record from DNS (signed with the identity key).
    */
   async unregister(): Promise<DNSRegistrationResult> {
-    if (!this.dnsApiKey) {
-      return { success: false, error: 'No API key set — call register() first' };
-    }
+    const name = this.identity.name.toLowerCase();
+    const timestamp = Date.now();
 
     try {
-      const bridgeUrl = this.config.dnsServer.replace(/:\d+$/, '') + ':3004';
-      const url = `http://${bridgeUrl}/agent/endpoint`;
+      const signature = signWithAgentKey(
+        Buffer.from(dnsDeleteMessage(name, timestamp)),
+        this.keys.agentKeys.privateKey,
+      );
 
-      const response = await fetch(url, {
+      const response = await fetch(`${this.resolver.baseUrl()}/api/agents/${encodeURIComponent(name)}`, {
         method: 'DELETE',
         headers: {
-          'X-API-Key': this.dnsApiKey,
+          'Content-Type': 'application/json',
           'User-Agent': `AGENIUM/${this.identity.name}`,
         },
+        body: JSON.stringify({ timestamp, signature }),
         signal: AbortSignal.timeout(10000),
       });
 
-      const data = await response.json() as { success: boolean; error?: { message: string } };
+      const data = await response.json().catch(() => ({})) as {
+        success?: boolean;
+        error?: { code: string; message: string };
+      };
 
-      if (!data.success) {
-        return { success: false, error: data.error?.message ?? `HTTP ${response.status}` };
+      if (!response.ok || !data.success) {
+        return { success: false, error: data.error ? `${data.error.code}: ${data.error.message}` : `HTTP ${response.status}` };
       }
 
-      this.dnsApiKey = null;
+      this.registeredHost = null;
+      this.resolver.invalidate(name);
       this.emit('unregistered');
-      return { success: true };
+      return { success: true, domain: name };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { success: false, error: msg };
@@ -629,14 +645,10 @@ export class Agent extends EventEmitter {
 
   /**
    * Push updated tools to DNS without changing endpoint.
-   * Requires a prior register() call.
+   * Re-registers with the host from the last register() call.
    */
   async syncTools(): Promise<DNSRegistrationResult> {
-    if (!this.dnsApiKey) {
-      return { success: false, error: 'No API key set — call register() first' };
-    }
-    // Re-register with current tools (POST is idempotent)
-    return this.register(this.dnsApiKey);
+    return this.register({ host: this.registeredHost ?? undefined });
   }
 
   // ============================================================================
