@@ -5,6 +5,30 @@ All notable changes to Agenium will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-08
+
+### Changed
+- **DNS registry moved to `https://dns.agenium.net`** (Cloudflare Workers + D1).
+  The old server at `185.204.169.26` is offline; configs that still point at it
+  (e.g. `agenium.json` from `agenium init` ≤ 0.2.3) are redirected automatically
+  with a one-time warning.
+- **`agent.register()` is signed, not API-key based.** Registration and
+  `unregister()` are signed with the agent's Ed25519 identity key. The first
+  registration binds the name to that key; only the same key can update or
+  remove it. Requests carry a timestamp (±5 min) and must be newer than the last
+  accepted one, so captured requests can't be replayed.
+  - New call shape: `register({ host })`. The old `register(apiKey, host)` still
+    works; the API key is ignored.
+
+### Security
+- Previously the `signature` field on registration was never produced or
+  checked, so anyone could repoint any agent's endpoint. `verifyAgentKey()`
+  results are now meaningful because DNS keys can only be set by their owner.
+
+### Added
+- `dnsRegisterMessage()` / `dnsDeleteMessage()` — canonical signed payloads.
+- `DNSResolver.baseUrl()`, `DEFAULT_DNS_SERVER`.
+
 ## [0.1.0] - 2026-02-10
 
 ### 🎉 Initial Release

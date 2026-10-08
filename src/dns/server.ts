@@ -1,7 +1,7 @@
 /**
  * Mock DNS Server
  * For local testing and demo purposes
- * Simulates the DNS system at 185.204.169.26
+ * Local in-memory stand-in for the AGENIUM DNS registry (tests/demos)
  */
 
 import * as http from 'node:http';

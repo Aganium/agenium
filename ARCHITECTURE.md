@@ -32,7 +32,7 @@
 │                    EXTERNAL SYSTEMS                             │
 ├─────────────────┬─────────────────────┬─────────────────────────┤
 │  DNS System     │   Remote Agents     │   Bug Report Server     │
-│  185.204.169.26 │   (discovered)      │   (central collector)   │
+│ dns.agenium.net │   (discovered)      │   (central collector)   │
 └─────────────────┴─────────────────────┴─────────────────────────┘
 ```
 
@@ -50,7 +50,7 @@ agent://shannon → DNS lookup → { endpoint: "https://...", pubkey: "..." }
 
 **Components:**
 - `AgentURI` parser: validates and parses `agent://` scheme
-- `DNSClient`: queries 185.204.169.26 for agent records
+- `DNSClient`: queries dns.agenium.net for agent records
 - `EndpointCache`: TTL-based cache to reduce DNS lookups
 - `KeyStore`: caches public keys for verified agents
 
@@ -349,7 +349,7 @@ interface DaemonState {
   
   // Config
   config: {
-    dnsServer: string;          // Default: 185.204.169.26
+    dnsServer: string;          // Default: dns.agenium.net
     bugReportServer: string;    // Central collector
     listenPort: number;         // For inbound connections
     dataDir: string;            // ~/.agenium
@@ -477,7 +477,7 @@ interface DaemonState {
 
 ## 8. Open Questions for PHASE 2
 
-1. **DNS Protocol:** Exact API contract with 185.204.169.26
+1. **DNS Protocol:** Exact API contract with dns.agenium.net
 2. **Bug Report Server:** Deploy new or extend existing?
 3. **Agent Registration:** How do new agents join the network?
 4. **Capability Negotiation:** What capabilities are supported?

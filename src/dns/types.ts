@@ -1,6 +1,6 @@
 /**
  * DNS Types and API Contract
- * Defines the interface with DNS server at 185.204.169.26
+ * Defines the interface with the AGENIUM DNS registry (dns.agenium.net)
  */
 
 // ============================================================================
@@ -24,8 +24,27 @@ export interface DNSRegisterRequest {
   capabilities: string[];
   /** Supported protocol versions */
   protocolVersions: string[];
-  /** Signature of the registration data using agent's private key */
+  /** Tool definitions advertised to callers */
+  tools?: AgentTool[];
+  /** Free-form metadata */
+  metadata?: Record<string, unknown>;
+  /** ms since epoch; must be within 5 minutes of the server clock */
+  timestamp: number;
+  /** base64 Ed25519 signature of dnsRegisterMessage(...) with the agent identity key */
   signature: string;
+}
+
+/**
+ * Canonical payloads signed for DNS writes. The registry verifies these
+ * byte-for-byte, so they must stay in lockstep with the server.
+ * `name` is the lowercase agent name; `timestamp` is ms since epoch.
+ */
+export function dnsRegisterMessage(name: string, endpoint: string, publicKey: string, timestamp: number): string {
+  return ['agenium-dns/v1/register', name.toLowerCase(), endpoint, publicKey, String(timestamp)].join('\n');
+}
+
+export function dnsDeleteMessage(name: string, timestamp: number): string {
+  return ['agenium-dns/v1/delete', name.toLowerCase(), String(timestamp)].join('\n');
 }
 
 /**

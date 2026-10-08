@@ -1,6 +1,6 @@
 /**
  * DNS Resolver
- * Resolves agent:// URIs to endpoints via DNS system at 185.204.169.26
+ * Resolves agent:// URIs to endpoints via the AGENIUM DNS registry (dns.agenium.net)
  */
 
 import {
@@ -33,12 +33,24 @@ export interface DNSResolverConfig {
   port: number;
 }
 
+/** Public AGENIUM DNS registry (Cloudflare Worker + D1). */
+export const DEFAULT_DNS_SERVER = 'dns.agenium.net';
+
+/**
+ * Servers that no longer exist. Configs written by `agenium init` before 0.3.0
+ * hardcode one of these, so they are transparently redirected rather than
+ * failing every lookup with a network timeout.
+ */
+const LEGACY_DNS_SERVERS = new Set(['185.204.169.26', '185.204.169.26:3000']);
+
+let legacyWarned = false;
+
 const DEFAULT_CONFIG: DNSResolverConfig = {
-  server: '185.204.169.26',
+  server: DEFAULT_DNS_SERVER,
   timeoutMs: 10000,
   defaultTtlSeconds: 300,
-  useHttps: false,  // DNS server uses HTTP
-  port: 3000,       // DNS server port
+  useHttps: true,
+  port: 443,
 };
 
 // ============================================================================
@@ -61,6 +73,25 @@ export class DNSResolver {
 
   constructor(config: Partial<DNSResolverConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    if (LEGACY_DNS_SERVERS.has(this.config.server)) {
+      if (!legacyWarned) {
+        legacyWarned = true;
+        console.warn(
+          `[agenium] DNS server ${this.config.server} is retired; using ${DEFAULT_DNS_SERVER}. ` +
+          `Update "dnsServer" in your agenium.json to silence this warning.`,
+        );
+      }
+      this.config = { ...this.config, server: DEFAULT_DNS_SERVER, useHttps: true, port: 443 };
+    }
+  }
+
+  /** Base URL of the DNS registry API, e.g. `https://dns.agenium.net`. */
+  baseUrl(): string {
+    const protocol = this.config.useHttps ? 'https' : 'http';
+    const portSuffix = (this.config.useHttps && this.config.port === 443) ||
+                       (!this.config.useHttps && this.config.port === 80)
+                       ? '' : `:${this.config.port}`;
+    return `${protocol}://${this.config.server}${portSuffix}`;
   }
 
   /**
@@ -131,12 +162,8 @@ export class DNSResolver {
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
 
     try {
-      const protocol = this.config.useHttps ? 'https' : 'http';
-      const portSuffix = (this.config.useHttps && this.config.port === 443) || 
-                         (!this.config.useHttps && this.config.port === 80) 
-                         ? '' : `:${this.config.port}`;
       // DNS API endpoint: /agent/lookup/:domain
-      const url = `${protocol}://${this.config.server}${portSuffix}/agent/lookup/${encodeURIComponent(name)}`;
+      const url = `${this.baseUrl()}/agent/lookup/${encodeURIComponent(name)}`;
 
       const response = await fetch(url, {
         method: 'GET',

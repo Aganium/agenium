@@ -302,7 +302,7 @@ export interface AgeniumConfig {
  */
 export const DEFAULT_CONFIG: AgeniumConfig = {
   agentName: 'unnamed-agent',
-  dnsServer: '185.204.169.26',
+  dnsServer: 'dns.agenium.net',
   bugReportServer: 'https://bugs.agenium.local',
   listenPort: 8443,
   dataDir: '~/.agenium',

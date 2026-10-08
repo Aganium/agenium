@@ -328,7 +328,7 @@ async function cmdInit(useDefaults = false): Promise<void> {
     agentId: agentName,
     version: VERSION,
     dataDir,
-    dnsServer: '185.204.169.26',
+    dnsServer: 'dns.agenium.net',
     metricsPort: 9090,
     metricsHost: '127.0.0.1',
     timeouts: {
