@@ -21,10 +21,6 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
 
-      # npm trusted publishing (OIDC, no long-lived token) needs npm >= 11.5.1;
-      # Node 22 ships npm 10. NODE_AUTH_TOKEN below stays as a fallback.
-      - run: npm install -g npm@latest
-
       - run: npm ci
 
       - run: npm run typecheck
@@ -32,6 +28,12 @@ jobs:
       - run: npm run build
 
       - run: npm test
+
+      # Upgrade npm only for the publish step: trusted publishing (OIDC) needs
+      # npm >= 11.5.1 and Node 22 ships npm 10. Pinned to 11 because npm 12
+      # blocks dependency install scripts by default, which leaves
+      # better-sqlite3 without its native binding if it runs before `npm ci`.
+      - run: npm install -g npm@11
 
       - run: npm publish --provenance --access public
         env:
