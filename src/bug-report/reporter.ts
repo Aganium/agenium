@@ -95,7 +95,9 @@ export class BugReporter {
 
   constructor(config: Partial<BugReporterConfig> = {}) {
     this.config = {
-      serverUrl: config.serverUrl ?? process.env.BUG_REPORT_URL ?? 'http://localhost:3100/api/bug-reports',
+      // Was localhost:3100, so every install's reports went nowhere. bugs.agenium.net
+      // takes this format at /api/bug-reports without a token (write-only, rate limited).
+      serverUrl: config.serverUrl ?? process.env.BUG_REPORT_URL ?? 'https://bugs.agenium.net/api/bug-reports',
       authToken: config.authToken ?? process.env.BUG_REPORT_TOKEN ?? 'dev-token-change-me',
       agentId: config.agentId ?? 'unknown-agent',
       agentVersion: config.agentVersion ?? '0.1.0',
