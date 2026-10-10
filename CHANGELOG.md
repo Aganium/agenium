@@ -5,6 +5,15 @@ All notable changes to Agenium will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-10-10
+
+### Fixed
+- **Bug reports now reach a server.** The reporter defaulted to
+  `http://localhost:3100/api/bug-reports`, so reports from every install were
+  lost. The default is now `https://bugs.agenium.net/api/bug-reports`, which
+  accepts this format without a token (write-only, rate limited per IP).
+  `BUG_REPORT_URL` / `serverUrl` still override it.
+
 ## [0.3.0] - 2026-10-08
 
 ### Changed
